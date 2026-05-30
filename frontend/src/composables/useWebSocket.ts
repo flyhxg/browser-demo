@@ -6,8 +6,11 @@ export function useWebSocket() {
   const lastMessage = ref<WsMessage | null>(null)
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let intentionalClose = false
 
   function connect() {
+    if (ws && ws.readyState === WebSocket.OPEN) return
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${location.host}/ws`
     ws = new WebSocket(url)
@@ -26,7 +29,10 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       connected.value = false
-      scheduleReconnect()
+      ws = null
+      if (!intentionalClose) {
+        scheduleReconnect()
+      }
     }
 
     ws.onerror = () => {
@@ -40,7 +46,9 @@ export function useWebSocket() {
   }
 
   function disconnect() {
+    intentionalClose = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectTimer = null
     ws?.close()
     ws = null
   }

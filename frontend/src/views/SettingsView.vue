@@ -87,32 +87,44 @@ const apiProviders = computed(() => {
 })
 
 async function loadConfig() {
-  const resp = await fetch('/api/config')
-  config.value = await resp.json()
-  browserMode.value = config.value?.browser.mode || 'local'
-  cloudApiKey.value = config.value?.browser.cloud_api_key || ''
-  ollamaUrl.value = config.value?.providers.ollama.url || 'http://localhost:11434'
-  ollamaModel.value = config.value?.providers.ollama.model || ''
+  try {
+    const resp = await fetch('/api/config')
+    config.value = await resp.json()
+    browserMode.value = config.value?.browser.mode || 'local'
+    cloudApiKey.value = config.value?.browser.cloud_api_key || ''
+    ollamaUrl.value = config.value?.providers.ollama.url || 'http://localhost:11434'
+    ollamaModel.value = config.value?.providers.ollama.model || ''
+  } catch {
+    // server unreachable, keep stale config
+  }
 }
 
 async function saveProvider(provider: string, data: Record<string, string>) {
-  await fetch(`/api/config/${provider}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  await loadConfig()
+  try {
+    await fetch(`/api/config/${provider}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    await loadConfig()
+  } catch {
+    // best effort
+  }
 }
 
 async function validateProvider(provider: string) {
-  const resp = await fetch(`/api/config/${provider}/validate`, { method: 'POST' })
-  const data = await resp.json()
-  if (!data.valid) {
-    alert(`Validation failed: ${data.error}`)
-  } else {
-    alert('Valid!')
+  try {
+    const resp = await fetch(`/api/config/${provider}/validate`, { method: 'POST' })
+    const data = await resp.json()
+    if (!data.valid) {
+      alert(`Validation failed: ${data.error}`)
+    } else {
+      alert('Valid!')
+    }
+    await loadConfig()
+  } catch {
+    alert('Validation failed: cannot reach server')
   }
-  await loadConfig()
 }
 
 async function checkOllama() {
@@ -130,20 +142,28 @@ async function checkOllama() {
 }
 
 async function saveOllama() {
-  await fetch('/api/config/ollama', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: ollamaUrl.value, model: ollamaModel.value }),
-  })
-  await loadConfig()
+  try {
+    await fetch('/api/config/ollama', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: ollamaUrl.value, model: ollamaModel.value }),
+    })
+    await loadConfig()
+  } catch {
+    // best effort
+  }
 }
 
 async function saveBrowserMode() {
-  await fetch('/api/config/browser-mode', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: browserMode.value, cloud_api_key: cloudApiKey.value }),
-  })
+  try {
+    await fetch('/api/config/browser-mode', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: browserMode.value, cloud_api_key: cloudApiKey.value }),
+    })
+  } catch {
+    // best effort
+  }
 }
 
 onMounted(loadConfig)

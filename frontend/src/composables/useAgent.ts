@@ -23,21 +23,30 @@ export function useAgent() {
   async function startTask(task: string, provider: string) {
     reset()
     running.value = true
-    const resp = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task, provider }),
-    })
-    if (!resp.ok) {
-      const data = await resp.json()
+    try {
+      const resp = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, provider }),
+      })
+      if (!resp.ok) {
+        const data = await resp.json()
+        running.value = false
+        error.value = { message: data.detail || 'Failed to start task', step: 0 }
+        return
+      }
+    } catch (e) {
       running.value = false
-      error.value = { message: data.detail || 'Failed to start task', step: 0 }
-      return
+      error.value = { message: 'Network error: cannot reach server', step: 0 }
     }
   }
 
   async function cancelTask() {
-    await fetch('/api/tasks/cancel', { method: 'POST' })
+    try {
+      await fetch('/api/tasks/cancel', { method: 'POST' })
+    } catch {
+      // best effort
+    }
     running.value = false
   }
 
@@ -58,7 +67,7 @@ export function useAgent() {
       result.value = msg.data as ResultData
       running.value = false
       // Mark all steps as done
-      steps.value.forEach((s) => (s.status = 'done'))
+      steps.value = steps.value.map((s) => ({ ...s, status: 'done' as const }))
     } else if (msg.type === 'error') {
       error.value = msg.data as ErrorData
       running.value = false

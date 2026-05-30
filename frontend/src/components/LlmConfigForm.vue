@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps<{
   provider: string
@@ -46,7 +46,7 @@ const model = ref(props.model)
 const validating = ref(false)
 const validResult = ref<boolean | null>(null)
 
-const placeholder = props.configured ? props.maskedKey : 'Enter API key'
+const placeholder = computed(() => props.configured ? props.maskedKey : 'Enter API key')
 
 onMounted(() => {
   model.value = props.model

@@ -57,6 +57,24 @@ class AgentRunner:
     def on_error(self, callback) -> None:
         self._on_error.append(callback)
 
+    def off_step(self, callback) -> None:
+        try:
+            self._on_step.remove(callback)
+        except ValueError:
+            pass
+
+    def off_result(self, callback) -> None:
+        try:
+            self._on_result.remove(callback)
+        except ValueError:
+            pass
+
+    def off_error(self, callback) -> None:
+        try:
+            self._on_error.remove(callback)
+        except ValueError:
+            pass
+
     async def run(self, task: str, provider: str) -> None:
         if self._running:
             raise RuntimeError("A task is already running")
@@ -138,7 +156,7 @@ class AgentRunner:
     async def cancel(self) -> None:
         if self._agent:
             self._agent.stop()
-            self._running = False
+        self._running = False
 
 
 runner = AgentRunner()
