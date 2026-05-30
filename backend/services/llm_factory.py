@@ -5,6 +5,7 @@ from browser_use import (
     ChatOllama,
     ChatOpenAI,
 )
+from browser_use.llm import ChatDeepSeek
 
 from services.config_store import get_provider_config
 
@@ -12,7 +13,7 @@ PROVIDER_CLASS_MAP = {
     "openai": ChatOpenAI,
     "anthropic": ChatAnthropic,
     "google": ChatGoogle,
-    "deepseek": ChatOpenAI,
+    "deepseek": ChatDeepSeek,
     "groq": ChatGroq,
     "ollama": ChatOllama,
 }
@@ -22,7 +23,7 @@ class ProviderNotConfiguredError(Exception):
     pass
 
 
-def create_llm(provider_name: str) -> ChatOpenAI | ChatAnthropic | ChatGoogle | ChatGroq | ChatOllama:
+def create_llm(provider_name: str) -> ChatOpenAI | ChatAnthropic | ChatGoogle | ChatDeepSeek | ChatGroq | ChatOllama:
     config = get_provider_config(provider_name)
     if not config or not config.get("configured"):
         raise ProviderNotConfiguredError(f"Provider '{provider_name}' is not configured")
