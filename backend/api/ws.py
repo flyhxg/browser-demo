@@ -1,5 +1,3 @@
-import json
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from services.agent_runner import StepEvent, ResultEvent, ErrorEvent, runner
