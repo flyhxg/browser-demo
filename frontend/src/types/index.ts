@@ -1,45 +1,11 @@
-export interface ProviderConfig {
-  model: string
-  configured: boolean
-}
-
-export interface OpenAIConfig extends ProviderConfig {
-  api_key_masked: string
-}
-
-export interface AnthropicConfig extends ProviderConfig {
-  api_key_masked: string
-}
-
-export interface GoogleConfig extends ProviderConfig {
-  api_key_masked: string
-}
-
-export interface DeepSeekConfig extends ProviderConfig {
-  api_key_masked: string
-}
-
-export interface GroqConfig extends ProviderConfig {
-  api_key_masked: string
-}
-
-export interface OllamaConfig extends ProviderConfig {
-  url: string
-}
-
 export interface AppConfig {
-  providers: {
-    openai: OpenAIConfig
-    anthropic: AnthropicConfig
-    google: GoogleConfig
-    deepseek: DeepSeekConfig
-    groq: GroqConfig
-    ollama: OllamaConfig
-  }
-  browser: {
-    mode: 'local' | 'cloud'
-    cloud_api_key: string
-  }
+  api_key_masked: string
+  base_url: string
+  model: string
+  protocol: 'openai' | 'anthropic'
+  configured: boolean
+  browser_mode: 'local' | 'cloud'
+  browser_use_api_key_masked: string
 }
 
 export interface StepData {
@@ -61,7 +27,33 @@ export interface ErrorData {
   step: number
 }
 
+export interface LiveUrlData {
+  url: string
+}
+
+export interface QueueStatusData {
+  pending: number
+}
+
 export interface WsMessage {
-  type: 'step' | 'result' | 'error' | 'cancelled'
-  data: StepData | ResultData | ErrorData | Record<string, never>
+  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status'
+  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | Record<string, never>
+}
+
+// Task configuration options
+export interface TaskOptions {
+  task: string
+  sensitive_data?: Record<string, string | Record<string, string>>
+  initial_actions?: Array<Record<string, Record<string, any>>>
+  use_vision?: boolean
+  headless?: boolean
+  max_failures?: number
+  max_actions_per_step?: number
+  step_timeout?: number
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  timestamp: Date
 }
