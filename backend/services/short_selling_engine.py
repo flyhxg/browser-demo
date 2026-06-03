@@ -5,7 +5,7 @@ from services.datasources.technical import get_klines, calculate_rsi, calculate_
 from services.datasources.arkham import get_exchange_netflow, get_whale_movements
 from services.datasources.whale_alert import get_large_transactions
 from services.datasources.coingecko import get_coin_details
-from services.memory_manager import update_token_memory
+from services.memory_manager import load_token_memory, update_token_memory
 from services.database import get_db
 import json
 
