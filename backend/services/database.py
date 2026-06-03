@@ -245,6 +245,54 @@ def init_db() -> None:
         )
     """)
 
+    # ---- Analysis Reports ----
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            dimensions TEXT,
+            timeframe TEXT DEFAULT '24h',
+            request_type TEXT DEFAULT 'single',
+            raw_data TEXT,
+            llm_summary TEXT,
+            strengths TEXT,
+            risks TEXT,
+            confidence REAL,
+            recommendation TEXT,
+            time_horizon TEXT,
+            version INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'completed',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id INTEGER NOT NULL,
+            dimension TEXT NOT NULL,
+            metric_name TEXT NOT NULL,
+            metric_value REAL,
+            metric_unit TEXT,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (report_id) REFERENCES analysis_reports(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS token_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL UNIQUE,
+            first_queried TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_queried TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            user_interests TEXT,
+            key_levels TEXT,
+            related_sectors TEXT,
+            notes TEXT,
+            analysis_history TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
