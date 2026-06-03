@@ -6,15 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "vitest run"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.10",
     "typescript": "~6.0.2",
     "vite": "^8.0.12",
+    "vitest": "^4.1.8",
     "vue": "^3.5.35"
   },
   "dependencies": {
+    "echarts": "^6.1.0",
+    "pinia": "^3.0.4",
+    "vue-echarts": "^8.0.1",
     "vue-router": "^4.6.4"
   }
 }
