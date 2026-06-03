@@ -1,5 +1,5 @@
-import { ref, computed } from 'vue'
-import type { StepData, ResultData, ErrorData } from '../types'
+import { ref } from 'vue'
+import type { StepData, ResultData, ErrorData, TaskOptions, LiveUrlData, QueueStatusData, ThinkingStep, ToolCall, ThinkingData, ToolCallStartData, ToolCallResultData } from '../types'
 
 export function useAgent() {
   const steps = ref<StepData[]>([])
@@ -7,10 +7,11 @@ export function useAgent() {
   const error = ref<ErrorData | null>(null)
   const running = ref(false)
   const screenshot = ref<string | null>(null)
-
-  const activeProvider = computed(() =>
-    steps.value.length > 0 ? 'running' : ''
-  )
+  const queuePending = ref(0)
+  const liveUrl = ref<string | null>(null)
+  const commandHistory = ref<ResultData[]>([])
+  const thinkingSteps = ref<ThinkingStep[]>([])
+  const toolCalls = ref<ToolCall[]>([])
 
   function reset() {
     steps.value = []
@@ -18,16 +19,21 @@ export function useAgent() {
     error.value = null
     running.value = false
     screenshot.value = null
+    queuePending.value = 0
+    liveUrl.value = null
+    commandHistory.value = []
+    thinkingSteps.value = []
+    toolCalls.value = []
   }
 
-  async function startTask(task: string, provider: string) {
+  async function startTask(options: TaskOptions) {
     reset()
     running.value = true
     try {
       const resp = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, provider }),
+        body: JSON.stringify(options),
       })
       if (!resp.ok) {
         const data = await resp.json()
@@ -35,7 +41,7 @@ export function useAgent() {
         error.value = { message: data.detail || 'Failed to start task', step: 0 }
         return
       }
-    } catch (e) {
+    } catch {
       running.value = false
       error.value = { message: 'Network error: cannot reach server', step: 0 }
     }
@@ -50,13 +56,22 @@ export function useAgent() {
     running.value = false
   }
 
+  async function resetTask() {
+    try {
+      await fetch('/api/tasks/reset', { method: 'POST' })
+    } catch {
+      // best effort
+    }
+    running.value = false
+    error.value = null
+  }
+
   function handleWsMessage(msg: { type: string; data: unknown }) {
     if (msg.type === 'step') {
       const stepData = msg.data as StepData
-      // Update existing step or add new
       const idx = steps.value.findIndex((s) => s.step === stepData.step)
       if (idx >= 0) {
-        steps.value[idx] = stepData
+        steps.value[idx] = { ...steps.value[idx], ...stepData }
       } else {
         steps.value.push(stepData)
       }
@@ -64,15 +79,33 @@ export function useAgent() {
         screenshot.value = stepData.screenshot
       }
     } else if (msg.type === 'result') {
-      result.value = msg.data as ResultData
+      const resultData = msg.data as ResultData
+      result.value = resultData
+      commandHistory.value.push(resultData)
       running.value = false
-      // Mark all steps as done
       steps.value = steps.value.map((s) => ({ ...s, status: 'done' as const }))
     } else if (msg.type === 'error') {
       error.value = msg.data as ErrorData
       running.value = false
     } else if (msg.type === 'cancelled') {
       running.value = false
+    } else if (msg.type === 'live_url') {
+      liveUrl.value = (msg.data as LiveUrlData).url
+    } else if (msg.type === 'queue_status') {
+      queuePending.value = (msg.data as QueueStatusData).pending
+    } else if (msg.type === 'thinking') {
+      const data = msg.data as ThinkingData
+      thinkingSteps.value.push({ step: data.step, description: data.description })
+    } else if (msg.type === 'tool_call_start') {
+      const data = msg.data as ToolCallStartData
+      toolCalls.value.push({ name: data.tool, arguments: data.arguments, status: 'pending' })
+    } else if (msg.type === 'tool_call_result') {
+      const data = msg.data as ToolCallResultData
+      const tc = toolCalls.value.find(t => t.name === data.tool)
+      if (tc) {
+        tc.status = 'completed'
+        tc.result = data.result
+      }
     }
   }
 
@@ -82,9 +115,14 @@ export function useAgent() {
     error,
     running,
     screenshot,
-    activeProvider,
+    queuePending,
+    liveUrl,
+    commandHistory,
+    thinkingSteps,
+    toolCalls,
     startTask,
     cancelTask,
+    resetTask,
     handleWsMessage,
     reset,
   }
