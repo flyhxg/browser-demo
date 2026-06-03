@@ -37,14 +37,14 @@ async def get_hot_tokens(limit: int = 50) -> list[dict[str, Any]]:
     return [_token_to_dict(t) for t in tokens]
 
 
-@router.get("/{symbol}")
-async def get_token_detail(symbol: str) -> dict[str, Any]:
-    """Get single token detail."""
+@router.get("/status")
+async def scanner_status() -> dict[str, Any]:
+    """Get scanner running status."""
     scanner = get_scanner()
-    token = scanner._hot_tokens.get(symbol)
-    if not token:
-        raise HTTPException(status_code=404, detail=f"Token {symbol} not found")
-    return _token_to_dict(token)
+    return {
+        "running": scanner._running,
+        "tokens_count": len(scanner._hot_tokens),
+    }
 
 
 @router.post("/start")
@@ -63,14 +63,40 @@ async def stop_scanner() -> dict[str, str]:
     return {"status": "stopped"}
 
 
-@router.get("/status")
-async def scanner_status() -> dict[str, Any]:
-    """Get scanner running status."""
+@router.get("/auto/status")
+async def get_auto_status() -> dict[str, Any]:
+    """Get auto-trading status."""
     scanner = get_scanner()
-    return {
-        "running": scanner._running,
-        "tokens_count": len(scanner._hot_tokens),
-    }
+    return scanner.get_auto_status()
+
+
+@router.post("/auto/enable")
+async def enable_auto_trading(data: dict[str, Any] | None = None) -> dict[str, str]:
+    """Enable auto-trading mode."""
+    scanner = get_scanner()
+    threshold = 0.8
+    if data and "threshold" in data:
+        threshold = float(data["threshold"])
+    scanner.set_auto_mode(True, threshold)
+    return {"status": "enabled"}
+
+
+@router.post("/auto/disable")
+async def disable_auto_trading() -> dict[str, str]:
+    """Disable auto-trading mode."""
+    scanner = get_scanner()
+    scanner.set_auto_mode(False)
+    return {"status": "disabled"}
+
+
+@router.get("/{symbol}")
+async def get_token_detail(symbol: str) -> dict[str, Any]:
+    """Get single token detail."""
+    scanner = get_scanner()
+    token = scanner._hot_tokens.get(symbol)
+    if not token:
+        raise HTTPException(status_code=404, detail=f"Token {symbol} not found")
+    return _token_to_dict(token)
 
 
 @router.post("/{symbol}/analyze")

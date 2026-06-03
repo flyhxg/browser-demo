@@ -29,7 +29,7 @@ class AgentGraph:
     """Agent state-machine for tool-calling workflow."""
 
     def __init__(self, event_callback: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None):
-        self._event_callback = event_callback or (lambda _t, _d: None)
+        self._event_callback = event_callback
 
     async def run(self, state: AgentState) -> AgentState:
         try:
@@ -67,7 +67,7 @@ class AgentGraph:
             f"If no tools are needed, respond with an empty array []."
         )
         result = await llm.ainvoke([UserMessage(content=prompt)])
-        raw = result.content if hasattr(result, "content") else str(result)
+        raw = result.completion if hasattr(result, "completion") else str(result)
         try:
             selected = json.loads(raw)
             if isinstance(selected, list):
@@ -116,4 +116,4 @@ class AgentGraph:
             f"Tool results:\n{results_text}\n\nSummary:"
         )
         result = await llm.ainvoke([UserMessage(content=prompt)])
-        state.summary = result.content if hasattr(result, "content") else str(result)
+        state.summary = result.completion if hasattr(result, "completion") else str(result)

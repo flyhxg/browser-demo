@@ -10,10 +10,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import ccxt
+import ccxt.async_support as ccxt
 
 from services.config_store import get_config
 from services.database import get_db
+from services.signal_analyzer import SignalAnalyzer
+from services.trading_engine import TradingEngine
 from services.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,12 @@ class HotTokensScanner:
         self._task: Optional[asyncio.Task] = None
         self._hot_tokens: dict[str, HotToken] = {}
 
+        # Auto-trading state
+        self._auto_enabled = False
+        self._auto_threshold = 0.8
+        self._auto_cooldown: dict[str, float] = {}  # symbol -> last_trade_timestamp
+        self._cooldown_seconds = 3600  # 1 hour cooldown between auto-trades per symbol
+
     # --- Public API ---
 
     def start(self) -> None:
@@ -80,6 +88,20 @@ class HotTokensScanner:
             self._task = None
         logger.info("HotTokensScanner stopped")
 
+    def set_auto_mode(self, enabled: bool, threshold: float = 0.8) -> None:
+        """Enable or disable auto-trading mode."""
+        self._auto_enabled = enabled
+        self._auto_threshold = threshold
+        logger.info(f"Auto-trading set to: {enabled}, threshold: {threshold}")
+
+    def get_auto_status(self) -> dict:
+        """Get auto-trading status."""
+        return {
+            "enabled": self._auto_enabled,
+            "threshold": self._auto_threshold,
+            "cooldowns": len(self._auto_cooldown),
+        }
+
     def get_hot_tokens(self, limit: int = 50) -> list[HotToken]:
         """Get current hot tokens sorted by heat score."""
         tokens = list(self._hot_tokens.values())
@@ -89,11 +111,13 @@ class HotTokensScanner:
     # --- Internal Loop ---
 
     async def _run_loop(self) -> None:
-        """Main loop: fetch data, calculate scores, broadcast."""
+        """Main loop: fetch data, calculate scores, broadcast, auto-trade."""
         while self._running:
             try:
                 await self._fetch_and_update()
                 await self._broadcast_update()
+                if self._auto_enabled:
+                    await self._check_and_auto_trade()
             except Exception as e:
                 logger.warning(f"HotTokensScanner loop error: {e}")
             await asyncio.sleep(60)  # Scan every 60 seconds
@@ -251,6 +275,68 @@ class HotTokensScanner:
             for t in tokens
         ]
         await manager.broadcast({"type": "hot_tokens_update", "data": data})
+
+
+    async def _check_and_auto_trade(self) -> None:
+        """Check top tokens and auto-trade if conditions are met."""
+        import time
+        config = get_config()
+        api_key = config.get("binance_api_key", "")
+        api_secret = config.get("binance_secret_key", "")
+
+        if not api_key or not api_secret:
+            return
+
+        for token in self.get_hot_tokens(limit=10):
+            # Check heat threshold
+            if token.heat_score < self._auto_threshold:
+                continue
+
+            # Check cooldown
+            last_trade = self._auto_cooldown.get(token.symbol)
+            if last_trade and (time.time() - last_trade) < self._cooldown_seconds:
+                continue
+
+            logger.info(f"Auto-trading candidate: {token.symbol} (heat={token.heat_score:.2f})")
+
+            try:
+                # LLM Analysis
+                analyzer = SignalAnalyzer()
+                content = (
+                    f"Token: {token.symbol}\n"
+                    f"Price: {token.price}\n"
+                    f"24h Change: {token.price_change_24h}%\n"
+                    f"24h Volume: {token.volume_usd} USD\n"
+                    f"Funding Rate: {token.funding_rate}\n"
+                    f"Long/Short Ratio: {token.long_short_ratio}\n"
+                    f"Heat Score: {token.heat_score}\n"
+                )
+                analysis = await analyzer.analyze(content)
+                confidence = float(analysis.get("confidence", 0))
+                sentiment = analysis.get("sentiment", "neutral")
+
+                logger.info(f"Analysis for {token.symbol}: sentiment={sentiment}, confidence={confidence}")
+
+                # Only trade on bullish signals with high confidence
+                if sentiment == "bullish" and confidence >= self._auto_threshold:
+                    engine = TradingEngine(api_key, api_secret, config.get("binance_testnet", True))
+                    signal = {
+                        "token": token.symbol.replace("USDT", ""),
+                        "sentiment": "bullish",
+                        "confidence": confidence,
+                        "signal_id": None,
+                    }
+                    try:
+                        result = await engine.execute_signal(signal)
+                        logger.info(f"Auto-trade executed for {token.symbol}: {result}")
+                        self._auto_cooldown[token.symbol] = time.time()
+                    finally:
+                        await engine.trader.close()
+                else:
+                    logger.info(f"Auto-trade skipped for {token.symbol}: sentiment={sentiment}, confidence={confidence}")
+
+            except Exception as e:
+                logger.warning(f"Auto-trade failed for {token.symbol}: {e}")
 
 
 # Global singleton

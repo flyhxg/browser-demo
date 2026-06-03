@@ -13,7 +13,6 @@ class WebSocketManager:
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accept and register a new WebSocket connection."""
-        await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:

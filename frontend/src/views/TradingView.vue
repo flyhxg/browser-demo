@@ -157,6 +157,15 @@
           <button class="btn-outline" @click="stopScanner" :disabled="!scannerRunning">
             Stop Scanner
           </button>
+          <div class="auto-trade-toggle">
+            <label class="toggle-label">
+              <input type="checkbox" v-model="autoTradeEnabled" @change="toggleAutoTrade" />
+              <span class="toggle-text">Auto Trade</span>
+              <span class="toggle-status" :class="autoTradeEnabled ? 'on' : 'off'">
+                {{ autoTradeEnabled ? 'ON' : 'OFF' }}
+              </span>
+            </label>
+          </div>
         </div>
         <div v-if="hotTokens.length === 0 && !htLoading" class="empty-state">
           <div class="empty-icon">🔥</div>
@@ -418,6 +427,7 @@ const posLoading = ref(false)
 const hotTokens = ref<HotToken[]>([])
 const htLoading = ref(false)
 const scannerRunning = ref(false)
+const autoTradeEnabled = ref(false)
 
 const pendingCount = computed(() => signals.value.filter(s => s.status === 'pending').length)
 const executedCount = computed(() => signals.value.filter(s => s.status === 'executed').length)
@@ -605,6 +615,26 @@ async function tradeHotToken(symbol: string) {
   } catch { /* ignore */ }
 }
 
+async function toggleAutoTrade() {
+  try {
+    if (autoTradeEnabled.value) {
+      await fetch('/api/hot_tokens/auto/enable', { method: 'POST' })
+    } else {
+      await fetch('/api/hot_tokens/auto/disable', { method: 'POST' })
+    }
+  } catch { /* ignore */ }
+}
+
+async function fetchAutoTradeStatus() {
+  try {
+    const resp = await fetch('/api/hot_tokens/auto/status')
+    if (resp.ok) {
+      const data = await resp.json()
+      autoTradeEnabled.value = data.enabled || false
+    }
+  } catch { /* ignore */ }
+}
+
 // --- Polymarket API ---
 async function fetchPmStatus() {
   try {
@@ -673,6 +703,7 @@ onMounted(() => {
   fetchPositions()
   fetchHotTokens()
   fetchScannerStatus()
+  fetchAutoTradeStatus()
   fetchPmStatus()
   fetchPmSignals()
   fetchPmPositions()
@@ -933,6 +964,15 @@ onMounted(() => {
 .hot-tokens-table th { font-size: 12px; color: #71717a; text-transform: uppercase; }
 .hot-tokens-table td { font-size: 14px; color: #e4e4e7; }
 .hot-tokens-table .btn-outline { margin-right: 4px; }
+
+/* Auto Trade Toggle */
+.auto-trade-toggle { display: flex; align-items: center; }
+.toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #a1a1aa; font-size: 14px; }
+.toggle-label input[type="checkbox"] { accent-color: #6366f1; width: 16px; height: 16px; cursor: pointer; }
+.toggle-text { font-weight: 500; }
+.toggle-status { font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 600; }
+.toggle-status.on { background: rgba(34,197,94,0.15); color: #22c55e; }
+.toggle-status.off { background: #27272a; color: #71717a; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
