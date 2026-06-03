@@ -1,14 +1,8 @@
 {
-  "providers": {
-    "openai": { "api_key": "", "model": "gpt-4o", "configured": false },
-    "anthropic": { "api_key": "", "model": "claude-sonnet-4-20250514", "configured": false },
-    "google": { "api_key": "", "model": "gemini-2.5-pro", "configured": false },
-    "deepseek": { "api_key": "", "model": "deepseek-chat", "configured": false },
-    "groq": { "api_key": "", "model": "meta-llama/llama-4-maverick-17b-128e-instruct", "configured": false },
-    "ollama": { "url": "http://localhost:11434", "model": "", "configured": false }
-  },
-  "browser": {
-    "mode": "local",
-    "cloud_api_key": ""
-  }
+  "api_key": "sk-cp-TDe7MiObnzyfEW64Wklfy-lEK9CQdfKPI8f2o7PG-VURec-o_LXakrw2m6DRFr9b4DAR1Oi0z10uuK6U2M-mnAqaZU8E13M65OJw6rS4bmqgwkcYz-MIdHs",
+  "base_url": "https://api.minimaxi.com/v1",
+  "model": "MiniMax-M2.7",
+  "protocol": "openai",
+  "browser_mode": "cloud",
+  "browser_use_api_key": "bu_9dQgNL9oBd1xM8RhsUzGC7ipwx1bT3-bHY3shLLUeNk"
 }

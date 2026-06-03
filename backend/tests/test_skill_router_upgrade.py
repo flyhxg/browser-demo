@@ -20,7 +20,8 @@ async def test_route_uses_function_calling_when_tools_selected():
 
 
 @pytest.mark.asyncio
-async def test_route_fallback_to_keywords_when_no_tools():
+async def test_route_returns_generic_when_no_tools():
+    """When AgentGraph returns no tools, return a generic message."""
     router = SkillRouter()
     with patch("services.skill_router.AgentGraph") as MockGraph:
         mock_graph = AsyncMock()
@@ -29,4 +30,5 @@ async def test_route_fallback_to_keywords_when_no_tools():
         MockGraph.return_value = mock_graph
 
         result = await router.route("price", None)
-        assert result["type"] == "market_data"
+        assert result["type"] == "general"
+        assert "couldn't process" in result["output"]

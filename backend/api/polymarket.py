@@ -1,0 +1,373 @@
+"""Polymarket Prediction Market API endpoints."""
+import asyncio
+import logging
+import time
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+
+from services.database import get_db
+from services.polymarket_monitor import PositionMonitor
+from services.polymarket_poller import ClusterSignal, TopUsersPoller
+from services.polymarket_trader import PolymarketTrader
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/polymarket")
+
+# Global poller and monitor instances
+_polymarket_poller: TopUsersPoller | None = None
+_position_monitor: PositionMonitor | None = None
+
+
+@router.get("/signals")
+async def get_polymarket_signals(status: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """Get prediction market signals with optional filters."""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    if status:
+        cursor.execute(
+            """SELECT * FROM polymarket_signals WHERE status = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (status, limit),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM polymarket_signals ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return {
+        "signals": [
+            {
+                "id": r["id"],
+                "signal_id": r["signal_id"],
+                "market_slug": r["market_slug"],
+                "question": r["question"],
+                "outcome": r["outcome"],
+                "side": r["side"],
+                "avg_price": r["avg_price"],
+                "total_value": r["total_value"],
+                "unique_users": r["unique_users"],
+                "confidence": r["confidence"],
+                "net_inflow": r["net_inflow"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/signals/{signal_id}")
+async def get_polymarket_signal(signal_id: str) -> dict[str, Any]:
+    """Get a single signal."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM polymarket_signals WHERE signal_id = ?", (signal_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Signal not found")
+
+    return {"signal": dict(row)}
+
+
+@router.get("/positions")
+async def get_polymarket_positions() -> dict[str, Any]:
+    """Get all open prediction market positions."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT * FROM polymarket_positions WHERE status = 'open'
+           ORDER BY opened_at DESC"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    return {
+        "positions": [
+            {
+                "position_id": r["position_id"],
+                "market_slug": r["market_slug"],
+                "question": r["question"],
+                "outcome": r["outcome"],
+                "side": r["side"],
+                "entry_price": r["entry_price"],
+                "current_price": r["current_price"],
+                "size": r["size"],
+                "pnl": r["pnl"],
+                "pnl_pct": r["pnl_pct"],
+                "stop_loss_price": r["stop_loss_price"],
+                "take_profit_price": r["take_profit_price"],
+                "opened_at": r["opened_at"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/trades")
+async def get_polymarket_trades(limit: int = 50) -> dict[str, Any]:
+    """Get prediction market trade history."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM polymarket_trades ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    return {"trades": [dict(r) for r in rows]}
+
+
+@router.get("/config")
+async def get_polymarket_config() -> dict[str, Any]:
+    """Get Polymarket configuration."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM polymarket_config WHERE id = 1")
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return {"config": {}}
+
+    return {
+        "config": {
+            "dry_run": bool(row["dry_run"]),
+            "poll_interval": row["poll_interval"],
+            "cluster_min_users": row["cluster_min_users"],
+            "cluster_min_value": row["cluster_min_value"],
+            "min_price": row["min_price"],
+            "max_price": row["max_price"],
+            "market_expiry_hours": row["market_expiry_hours"],
+            "sl_percentage": row["sl_percentage"],
+            "tp_percentage": row["tp_percentage"],
+            "auto_execute_threshold": row["auto_execute_threshold"],
+            "enabled": bool(row["enabled"]),
+        }
+    }
+
+
+@router.put("/config")
+async def update_polymarket_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Update Polymarket configuration."""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    fields = []
+    values = []
+    allowed = [
+        "api_key", "api_secret", "api_passphrase", "private_key",
+        "dry_run", "poll_interval", "cluster_min_users", "cluster_min_value",
+        "min_price", "max_price", "sl_percentage", "tp_percentage", "enabled",
+    ]
+    for key in allowed:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+
+    if fields:
+        query = f"UPDATE polymarket_config SET {', '.join(fields)} WHERE id = 1"
+        cursor.execute(query, values)
+        conn.commit()
+
+    conn.close()
+    return {"status": "updated"}
+
+
+@router.post("/start")
+async def start_polymarket_polling() -> dict[str, Any]:
+    """Start the Polymarket signal polling service."""
+    global _polymarket_poller, _position_monitor
+
+    if _polymarket_poller and _polymarket_poller._running:
+        return {"status": "already_running"}
+
+    # Load config
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM polymarket_config WHERE id = 1")
+    config = cursor.fetchone()
+    conn.close()
+
+    if not config:
+        return {"error": "Polymarket config not found"}
+
+    # Create trader
+    trader = PolymarketTrader(
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        api_passphrase=config["api_passphrase"],
+        private_key=config["private_key"],
+        dry_run=bool(config["dry_run"]) if config else True,
+    )
+
+    # Create and start poller
+    _polymarket_poller = TopUsersPoller(
+        poll_interval=config["poll_interval"] if config else 60,
+        cluster_min_users=config["cluster_min_users"] if config else 3,
+        cluster_min_value=config["cluster_min_value"] if config else 1000.0,
+        market_expiry_hours=config["market_expiry_hours"] if config else 6,
+        min_price=config["min_price"] if config else 0.01,
+        max_price=config["max_price"] if config else 0.99,
+    )
+
+    # Register signal handler
+    _polymarket_poller.on_signal(_handle_cluster_signal)
+    await _polymarket_poller.start()
+
+    # Start position monitor
+    _position_monitor = PositionMonitor(
+        trader=trader,
+        check_interval=30,
+        sl_percentage=config["sl_percentage"] if config else 0.15,
+        tp_percentage=config["tp_percentage"] if config else 0.05,
+    )
+    await _position_monitor.start()
+
+    return {"status": "started"}
+
+
+@router.post("/stop")
+async def stop_polymarket_polling() -> dict[str, Any]:
+    """Stop the Polymarket signal polling service."""
+    global _polymarket_poller, _position_monitor
+
+    if _polymarket_poller:
+        await _polymarket_poller.stop()
+        _polymarket_poller = None
+
+    if _position_monitor:
+        await _position_monitor.stop()
+        _position_monitor = None
+
+    return {"status": "stopped"}
+
+
+@router.get("/status")
+async def get_polymarket_status() -> dict[str, Any]:
+    """Get Polymarket service status."""
+    return {
+        "poller_running": _polymarket_poller is not None and _polymarket_poller._running,
+        "monitor_running": _position_monitor is not None,
+    }
+
+
+async def _handle_cluster_signal(signal: ClusterSignal) -> None:
+    """Handle incoming cluster signal: save to DB and optionally execute."""
+    import hashlib
+
+    signal_id = hashlib.sha256(
+        f"{signal.token_id}_{signal.outcome}_{time.time()}".encode()
+    ).hexdigest()[:16]
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Save signal
+    cursor.execute(
+        """
+        INSERT INTO polymarket_signals
+        (signal_id, market_slug, question, outcome, side, token_id, condition_id,
+         avg_price, total_value, unique_users, confidence, net_inflow, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        """,
+        (
+            signal_id, signal.market_slug, signal.market_slug, signal.outcome,
+            signal.side, signal.token_id, signal.condition_id, signal.avg_price,
+            signal.total_value, signal.unique_users, signal.confidence, signal.net_inflow,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    logger.info("Signal saved | id=%s | %s | %s", signal_id, signal.market_slug, signal.side)
+
+    # Auto-execute if confidence is high enough
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM polymarket_config WHERE id = 1")
+    config = cursor.fetchone()
+    conn.close()
+
+    auto_threshold = config["auto_execute_threshold"] if config else 0.7
+    if signal.confidence >= auto_threshold:
+        await _execute_signal(signal, signal_id)
+    else:
+        logger.info(
+            "Signal %s skipped execution | confidence=%.2f < threshold=%.2f",
+            signal_id, signal.confidence, auto_threshold
+        )
+
+
+async def _execute_signal(signal: ClusterSignal, signal_id: str) -> None:
+    """Execute a trading signal."""
+    logger.info("Executing signal %s | %s | %s | amount=$%.2f", signal_id, signal.market_slug, signal.side, signal.total_value)
+
+    # In dry_run mode, just simulate
+    # Real implementation would create actual orders
+
+    # Record trade
+    import hashlib
+    trade_id = f"trade_{signal_id}"
+    position_id = f"pos_{signal_id}"
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Record trade
+    cursor.execute(
+        """
+        INSERT INTO polymarket_trades
+        (trade_id, signal_id, position_id, token_id, condition_id, market_slug, outcome,
+         side, price, size, amount, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'filled')
+        """,
+        (
+            trade_id, signal_id, position_id, signal.token_id, signal.condition_id,
+            signal.market_slug, signal.outcome, signal.side, signal.avg_price,
+            signal.total_amount, signal.total_value,
+        ),
+    )
+
+    # Create position
+    if signal.side == "SELL":
+        sl_price = signal.avg_price * 1.15  # 15% stop loss (price goes up)
+        tp_price = signal.avg_price * 0.95    # 5% take profit (price goes down)
+    else:
+        sl_price = signal.avg_price * 0.85  # 15% stop loss (price goes down)
+        tp_price = signal.avg_price * 1.05    # 5% take profit (price goes up)
+
+    cursor.execute(
+        """
+        INSERT INTO polymarket_positions
+        (position_id, signal_id, token_id, condition_id, market_slug, question, outcome,
+         side, entry_price, current_price, size, entry_amount, highest_price, lowest_price,
+         stop_loss_price, take_profit_price, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+        """,
+        (
+            position_id, signal_id, signal.token_id, signal.condition_id,
+            signal.market_slug, signal.question, signal.outcome, signal.side,
+            signal.avg_price, signal.avg_price, signal.total_amount, signal.total_value,
+            signal.avg_price, signal.avg_price, sl_price, tp_price,
+        ),
+    )
+
+    # Update signal status
+    cursor.execute(
+        "UPDATE polymarket_signals SET status = 'executed', executed_at = ? WHERE signal_id = ?",
+        (time.time(), signal_id),
+    )
+
+    conn.commit()
+    conn.close()
+
+    logger.info("Signal %s executed | position_id=%s | trade_id=%s", signal_id, position_id, trade_id)

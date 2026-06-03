@@ -7,109 +7,100 @@
       :disabled="running"
     ></textarea>
     <div class="controls">
-      <select v-model="provider" :disabled="running">
-        <option value="" disabled>Select model</option>
-        <option
-          v-for="p in configuredProviders"
-          :key="p.name"
-          :value="p.name"
-        >
-          {{ p.label }} ({{ p.model }})
-        </option>
-      </select>
-      <button v-if="!running" @click="execute" :disabled="!task || !provider">
+      <button v-if="!running" class="btn-primary" @click="onSubmit" :disabled="!task">
         Execute
       </button>
-      <button v-else @click="cancel" class="cancel">Cancel</button>
+      <button v-else class="btn-danger" @click="cancel">Cancel</button>
+      <button class="btn-secondary" @click="reset">Reset</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import type { AppConfig } from '../types'
+import { ref } from 'vue'
 
 const props = defineProps<{ running: boolean }>()
 const emit = defineEmits<{
-  execute: [task: string, provider: string]
+  submit: [command: string]
   cancel: []
+  reset: []
 }>()
 
 const task = ref('')
-const provider = ref('')
-const config = ref<AppConfig | null>(null)
 
-const configuredProviders = computed(() => {
-  if (!config.value) return []
-  const providers = config.value.providers
-  const result: { name: string; label: string; model: string }[] = []
-  const map: Record<string, string> = {
-    openai: 'OpenAI',
-    anthropic: 'Claude',
-    google: 'Gemini',
-    deepseek: 'DeepSeek',
-    groq: 'Groq',
-    ollama: 'Ollama',
-  }
-  for (const [key, p] of Object.entries(providers)) {
-    if (p.configured) {
-      result.push({ name: key, label: map[key] || key, model: p.model })
-    }
-  }
-  return result
-})
-
-async function loadConfig() {
-  const resp = await fetch('/api/config')
-  config.value = await resp.json()
-}
-
-function execute() {
-  if (task.value && provider.value) {
-    emit('execute', task.value, provider.value)
-  }
+function onSubmit() {
+  if (!task.value.trim() || props.running) return
+  emit('submit', task.value.trim())
+  task.value = ''
 }
 
 function cancel() {
   emit('cancel')
 }
 
-onMounted(loadConfig)
+function reset() {
+  emit('reset')
+  task.value = ''
+}
 </script>
 
 <style scoped>
-.task-input { margin-bottom: 20px; }
+.task-input { margin-bottom: 24px; }
 textarea {
   width: 100%;
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  padding: 14px 16px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
   resize: vertical;
-  font-size: 14px;
+  font-size: 15px;
+  font-family: inherit;
+  background: #18181b;
+  color: #e4e4e7;
+  transition: border-color 0.15s;
   box-sizing: border-box;
 }
+textarea::placeholder { color: #52525b; }
+textarea:focus { outline: none; border-color: #6366f1; }
 .controls {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
 }
-select {
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  min-width: 200px;
-}
-button {
-  padding: 8px 20px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+.btn-primary {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 8px;
   cursor: pointer;
-  background: #4a9eff;
-  color: white;
-  font-weight: 500;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s;
 }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button:hover:not(:disabled) { background: #3a8eef; }
-button.cancel { background: #ff4a4a; }
-button.cancel:hover { background: #ef3a3a; }
+.btn-primary:hover:not(:disabled) { background: #5558e6; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-danger {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.btn-secondary {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #6b7280;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { background: #4b5563; }
 </style>

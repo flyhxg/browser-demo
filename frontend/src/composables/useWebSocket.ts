@@ -7,6 +7,7 @@ export function useWebSocket() {
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let intentionalClose = false
+  let offlineBuffer: object[] = []
 
   function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) return
@@ -17,11 +18,18 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       connected.value = true
+      const _ws = ws
+      while (offlineBuffer.length > 0 && _ws) {
+        const msg = offlineBuffer.shift()
+        if (msg) _ws.send(JSON.stringify(msg))
+      }
     }
 
     ws.onmessage = (event) => {
       try {
-        lastMessage.value = JSON.parse(event.data)
+        const parsed = JSON.parse(event.data)
+        // Force reactivity by creating a new object
+        lastMessage.value = { ...parsed }
       } catch {
         // ignore malformed messages
       }
@@ -30,6 +38,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       connected.value = false
       ws = null
+      offlineBuffer = []
       if (!intentionalClose) {
         scheduleReconnect()
       }
@@ -45,6 +54,18 @@ export function useWebSocket() {
     reconnectTimer = setTimeout(connect, 3000)
   }
 
+  function send(obj: object) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj))
+    } else {
+      offlineBuffer.push(obj)
+    }
+  }
+
+  function sendCommand(text: string) {
+    send({ type: 'command', command: text })
+  }
+
   function disconnect() {
     intentionalClose = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
@@ -57,5 +78,5 @@ export function useWebSocket() {
 
   onUnmounted(disconnect)
 
-  return { connected, lastMessage, disconnect }
+  return { connected, lastMessage, disconnect, send, sendCommand }
 }
