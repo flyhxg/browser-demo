@@ -3,10 +3,12 @@ import asyncio
 from typing import Any
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base import DataSource
 
 COIN_GECKO_BASE_URL = "https://api.coingecko.com/api/v3"
+COINGECKO_API = "https://api.coingecko.com/api/v3"
 
 
 class CoinGeckoSource(DataSource):
@@ -82,6 +84,39 @@ class CoinGeckoSource(DataSource):
             ],
         }
 
+    async def get_token_price(self, symbol: str) -> dict[str, Any]:
+        """Get current price for a specific token."""
+        # Try to resolve CoinGecko ID from symbol first
+        cg_id = symbol.lower()
+        try:
+            search_resp = await self._client.get("/search", params={"query": symbol})
+            search_resp.raise_for_status()
+            search_data = search_resp.json()
+            coins = search_data.get("coins", [])
+            if coins:
+                # Prefer exact symbol match, otherwise take first
+                exact = next((c for c in coins if c.get("symbol", "").upper() == symbol.upper()), None)
+                cg_id = exact["id"] if exact else coins[0]["id"]
+        except Exception:
+            pass
+
+        resp = await self._client.get(
+            "/simple/price",
+            params={
+                "ids": cg_id,
+                "vs_currencies": "usd",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "source": self.name,
+            "type": "price",
+            "symbol": symbol.upper(),
+            "cg_id": cg_id,
+            "data": data,
+        }
+
     async def search_token(self, query: str) -> dict[str, Any]:
         """Search for a specific token."""
         resp = await self._client.get("/search", params={"query": query})
@@ -108,3 +143,32 @@ class CoinGeckoSource(DataSource):
             return resp.status_code == 200
         except Exception:
             return False
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def get_coin_details(coin_id: str) -> dict:
+    """Fetch extended coin details including FDV and supply."""
+    url = f"{COINGECKO_API}/coins/{coin_id}"
+    params = {
+        "localization": "false",
+        "tickers": "false",
+        "market_data": "true",
+        "community_data": "false",
+        "developer_data": "false",
+        "sparkline": "false",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        market_data = data.get("market_data", {})
+        return {
+            "id": data.get("id"),
+            "symbol": data.get("symbol"),
+            "name": data.get("name"),
+            "fdv": market_data.get("fully_diluted_valuation"),
+            "market_cap": market_data.get("market_cap", {}).get("usd"),
+            "total_supply": market_data.get("total_supply"),
+            "circulating_supply": market_data.get("circulating_supply"),
+            "max_supply": market_data.get("max_supply"),
+        }
