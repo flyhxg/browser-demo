@@ -6,7 +6,7 @@
     </div>
     <div class="message-content">
       <div class="message-bubble" :class="msg.role">
-        <ThinkingBlock v-if="msg.thinkingSteps?.length" :steps="msg.thinkingSteps" />
+        <ThinkingBlock v-if="msg.thinkingSteps?.length && !msg.text" :steps="msg.thinkingSteps" />
         <ToolCallBlock v-for="(tc, idx) in msg.toolCalls" :key="idx" :toolCall="tc" />
         <p class="message-text">{{ msg.text }}</p>
       </div>
@@ -35,8 +35,10 @@ function formatTime(date: Date): string {
   gap: 12px;
   align-items: flex-start;
   animation: fadeIn 0.3s ease;
-  max-width: 800px;
-  margin: 0 auto 20px;
+  width: 100%;
+  margin: 0 0 20px;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 .message-row:last-child { margin-bottom: 0; }
 .message-row.user { flex-direction: row-reverse; }
@@ -61,7 +63,7 @@ function formatTime(date: Date): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 70%;
+  max-width: 100%;
 }
 .message-bubble {
   padding: 14px 18px;

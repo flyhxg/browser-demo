@@ -37,12 +37,15 @@ async def analyze_compare(req: CompareRequest):
 async def get_cached_report(symbol: str):
     from services.database import get_db
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM analysis_reports WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
-        (symbol.upper(),),
-    )
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="No report found for token")
-    return dict(row)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM analysis_reports WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+            (symbol.upper(),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No report found for token")
+        return dict(row)
+    finally:
+        conn.close()

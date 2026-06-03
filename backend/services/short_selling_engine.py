@@ -52,14 +52,16 @@ class ShortSellingEngine:
         }
 
         self._persist_report(report, dimensions)
-        update_token_memory(symbol, analysis_history=[report.get("timestamp")])
+        memory = load_token_memory(symbol)
+        history = memory.get("analysis_history", [])
+        history.append(report.get("timestamp"))
+        update_token_memory(symbol, analysis_history=history)
         return report
 
     async def compare(self, symbols: List[str], dimensions: List[str] = None) -> dict:
-        reports = []
-        for sym in symbols:
-            r = await self.analyze(sym, dimensions)
-            reports.append(r)
+        reports = await asyncio.gather(*[
+            self.analyze(sym, dimensions) for sym in symbols
+        ])
         return {
             "tokens": reports,
             "llm_comparison": f"Compared {len(symbols)} tokens.",
@@ -111,21 +113,24 @@ class ShortSellingEngine:
 
     def _now_iso(self) -> str:
         from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat() + "Z"
+        return datetime.now(timezone.utc).isoformat()
 
     def _persist_report(self, report: dict, dimensions: list):
         conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO analysis_reports (symbol, dimensions, raw_data, llm_summary, confidence, recommendation, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            report["symbol"],
-            json.dumps(dimensions),
-            json.dumps(report["dimensions"]),
-            report["llm_analysis"]["summary"],
-            report["llm_analysis"]["confidence"],
-            report["llm_analysis"]["recommendation"],
-            "completed",
-        ))
-        conn.commit()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO analysis_reports (symbol, dimensions, raw_data, llm_summary, confidence, recommendation, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                report["symbol"],
+                json.dumps(dimensions),
+                json.dumps(report["dimensions"]),
+                report["llm_analysis"]["summary"],
+                report["llm_analysis"]["confidence"],
+                report["llm_analysis"]["recommendation"],
+                "completed",
+            ))
+            conn.commit()
+        finally:
+            conn.close()

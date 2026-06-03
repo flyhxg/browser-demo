@@ -26,6 +26,20 @@ class SessionManager:
         conn.close()
         return {"id": session_id, "created_at": datetime.utcnow().isoformat()}
 
+    async def get_session(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve a session by ID, or None if not found."""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, created_at, last_active_at FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {"id": row[0], "created_at": row[1], "last_active_at": row[2]}
+        return None
+
     async def add_message(
         self,
         session_id: str,
@@ -76,7 +90,18 @@ class SessionManager:
             for row in rows
         ]
 
+    async def clear_messages(self, session_id: str) -> int:
+        """Delete all messages for a session, keeping the session itself."""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.commit()
+        deleted = cursor.rowcount
+        conn.close()
+        return deleted
+
     async def cleanup_expired_sessions(self, days: int = 7) -> int:
+        """Delete sessions and messages older than N days."""
         cutoff = datetime.utcnow() - timedelta(days=days)
         conn = get_db()
         cursor = conn.cursor()

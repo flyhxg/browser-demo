@@ -99,6 +99,22 @@ class OKXSource(DataSource):
             "data": data.get("data", []),
         }
 
+    async def get_funding_rate(self, symbol: str) -> dict[str, Any]:
+        """Get funding rate for a perpetual futures contract."""
+        inst_id = f"{symbol.upper()}-USDT-SWAP"
+        resp = await self._client.get(
+            "/api/v5/public/funding-rate",
+            params={"instId": inst_id},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "source": self.name,
+            "type": "funding_rate",
+            "symbol": symbol.upper(),
+            "data": data.get("data", []),
+        }
+
     async def health(self) -> bool:
         try:
             resp = await self._client.get("/api/v5/public/time")

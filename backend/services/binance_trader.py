@@ -127,13 +127,13 @@ class BaseTrader(ABC):
 class BinanceFuturesTrader(BaseTrader):
     """Binance Futures trader implementation using CCXT."""
 
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = False) -> None:
+    def __init__(self, api_key: str, api_secret: str, testnet: bool = False, proxy_url: str = "") -> None:
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
 
         # Initialize CCXT Binance futures
-        self.exchange = ccxt.binanceusdm({
+        exchange_config: dict[str, Any] = {
             "apiKey": api_key,
             "secret": api_secret,
             "enableRateLimit": True,
@@ -141,7 +141,10 @@ class BinanceFuturesTrader(BaseTrader):
                 "defaultType": "future",
                 "adjustForTimeDifference": True,
             },
-        })
+        }
+        if proxy_url:
+            exchange_config["aiohttp_proxy"] = proxy_url
+        self.exchange = ccxt.binanceusdm(exchange_config)
 
         if testnet:
             self.exchange.set_sandbox_mode(True)
@@ -451,11 +454,12 @@ def create_binance_trader(
     api_secret: str,
     mode: str = "futures",
     testnet: bool = False,
+    proxy_url: str = "",
 ) -> BaseTrader:
     """Factory function to create a Binance trader."""
     if mode == "futures":
-        return BinanceFuturesTrader(api_key, api_secret, testnet)
+        return BinanceFuturesTrader(api_key, api_secret, testnet, proxy_url)
     elif mode == "spot":
-        return BinanceSpotTrader(api_key, api_secret)
+        return BinanceSpotTrader(api_key, api_secret, proxy_url=proxy_url)
     else:
         raise ValueError(f"Unsupported trading mode: {mode}")

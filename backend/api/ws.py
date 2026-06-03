@@ -37,9 +37,46 @@ async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
     runner.set_ws(ws)
 
-    # Create a new session for this connection
-    session = await session_manager.create_session()
-    session_id = session["id"]
+    # Parse query params for session_id
+    session_id = None
+    try:
+        from urllib.parse import parse_qs, urlparse
+        query_string = ws.scope.get("query_string", b"").decode("utf-8")
+        params = parse_qs(query_string)
+        session_id = params.get("session_id", [None])[0]
+    except Exception:
+        pass
+
+    if session_id:
+        # Reuse existing session
+        try:
+            session = await session_manager.get_session(session_id)
+            if not session:
+                # Session not found, create new one
+                session = await session_manager.create_session()
+                session_id = session["id"]
+            else:
+                session_id = session["id"]
+        except Exception:
+            session = await session_manager.create_session()
+            session_id = session["id"]
+    else:
+        # Create a new session for this connection
+        session = await session_manager.create_session()
+        session_id = session["id"]
+
+    # Send session history to client on connect
+    try:
+        history = await session_manager.get_messages(session_id)
+        await ws.send_json({
+            "type": "history",
+            "data": {
+                "session_id": session_id,
+                "messages": history,
+            },
+        })
+    except Exception:
+        pass
 
     async def on_step(event: StepEvent):
         try:
@@ -123,8 +160,11 @@ async def websocket_endpoint(ws: WebSocket):
                 # Persist the user message
                 await session_manager.add_message(session_id, "user", command_text)
 
+                async def _agent_event_cb(event_type: str, data: dict) -> None:
+                    await on_agent_event(event_type, data)
+
                 # Route via skill router
-                route_result = await skill_router.route(command_text, ws)
+                route_result = await skill_router.route(command_text, ws, event_callback=_agent_event_cb)
                 intent = route_result.get("type", "general")
 
                 if intent == "browser":
@@ -147,6 +187,21 @@ async def websocket_endpoint(ws: WebSocket):
                     })
             elif msg_type == "ping":
                 await ws.send_json({"type": "pong", "data": {}})
+            elif msg_type == "clear_session":
+                # Clear messages for current session but keep the session itself
+                await session_manager.clear_messages(session_id)
+                await ws.send_json({
+                    "type": "session_cleared",
+                    "data": {"session_id": session_id},
+                })
+            elif msg_type == "new_session":
+                # Create a new session and switch to it
+                new_session = await session_manager.create_session()
+                session_id = new_session["id"]
+                await ws.send_json({
+                    "type": "session_created",
+                    "data": {"session_id": session_id},
+                })
     except WebSocketDisconnect:
         logger.debug("WebSocket client disconnected")
     finally:

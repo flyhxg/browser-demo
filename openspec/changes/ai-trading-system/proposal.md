@@ -11,6 +11,7 @@ The user wants a system that continuously monitors social sentiment (Binance Squ
   - Binance Square scraper (browser automation)
   - LLM signal analysis (sentiment + token extraction)
   - Multi-source market data validation (CoinGecko, OKX, Hyperliquid)
+  - **Short-selling analytics engine (derivatives, on-chain, unlock data, technical indicators)**
   - Configurable filtering rules engine
   - Binance Spot & Futures trading integration
   - Automatic TP/SL order placement

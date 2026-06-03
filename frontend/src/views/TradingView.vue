@@ -177,7 +177,7 @@
             <thead>
               <tr>
                 <th>Rank</th><th>Symbol</th><th>Price</th><th>24h Chg</th>
-                <th>Volume</th><th>Funding</th><th>L/S Ratio</th><th>Heat</th><th>Actions</th>
+                <th>Volume</th><th>Funding</th><th>Heat</th><th>Risk</th><th>Squeeze</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -190,10 +190,15 @@
                 </td>
                 <td>{{ (token.volume_usd / 1e6).toFixed(1) }}M</td>
                 <td>{{ (token.funding_rate * 100)?.toFixed(4) }}%</td>
-                <td>{{ token.long_short_ratio?.toFixed(2) }}</td>
                 <td>{{ token.heat_score?.toFixed(2) }}</td>
+                <td :class="token.short_risk_rating === 'extreme' ? 'loss' : ''">
+                  {{ (token.short_risk_rating || 'N/A').toUpperCase() }}
+                </td>
+                <td :class="(token.squeeze_risk || 0) > 0.6 ? 'loss' : ''">
+                  {{ token.squeeze_risk !== undefined ? (token.squeeze_risk * 100).toFixed(0) + '%' : 'N/A' }}
+                </td>
                 <td>
-                  <button class="btn-outline" @click="analyzeHotToken(token.symbol)">Analyze</button>
+                  <button class="btn-outline" @click="openAnalysis(token)">Analyze</button>
                   <button class="btn-accent" @click="tradeHotToken(token.symbol)">Trade</button>
                 </td>
               </tr>
@@ -368,12 +373,72 @@
         </div>
       </div>
     </div>
+    <!-- Token Analysis Modal -->
+    <div v-if="selectedToken" class="analysis-modal" @click.self="closeAnalysis">
+      <div class="analysis-panel">
+        <div class="analysis-header">
+          <h2>{{ selectedToken.symbol }} Analysis</h2>
+          <button class="btn-close" @click="closeAnalysis">&times;</button>
+        </div>
+        <div class="analysis-content">
+          <div class="analysis-metrics">
+            <div class="metric-card" :class="selectedToken.short_risk_rating">
+              <div class="metric-label">Short Risk</div>
+              <div class="metric-value">{{ selectedToken.short_risk_rating?.toUpperCase() || 'N/A' }}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Crowdedness</div>
+              <div class="metric-value">{{ ((selectedToken.crowdedness_score || 0) * 100).toFixed(0) }}%</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Squeeze Risk</div>
+              <div class="metric-value">{{ ((selectedToken.squeeze_risk || 0) * 100).toFixed(0) }}%</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Rebound</div>
+              <div class="metric-value">{{ ((selectedToken.rebound_potential || 0) * 100).toFixed(0) }}%</div>
+            </div>
+          </div>
+          <div class="analysis-charts">
+            <div class="chart-row">
+              <FundingRateChart
+                :funding-rate="selectedToken.funding_rate"
+                width="100%"
+                height="250px"
+              />
+              <SentimentRadar
+                :crowdedness-score="selectedToken.crowdedness_score || 0"
+                :squeeze-risk="selectedToken.squeeze_risk || 0"
+                :rebound-potential="selectedToken.rebound_potential || 0"
+                :heat-score="selectedToken.heat_score"
+                :funding-rate="selectedToken.funding_rate"
+                width="100%"
+                height="250px"
+              />
+            </div>
+          </div>
+          <div v-if="analysisLoading" class="analysis-loading">Loading detailed analysis...</div>
+          <div v-else-if="tokenAnalysis" class="analysis-recommendation">
+            <h3>Recommendation</h3>
+            <p>{{ tokenAnalysis.recommendation }}</p>
+            <div class="signal-badges">
+              <span v-if="tokenAnalysis.signals?.funding_extreme" class="signal-badge warning">Extreme Funding</span>
+              <span v-if="tokenAnalysis.signals?.overcrowded_short" class="signal-badge danger">Overcrowded Short</span>
+              <span v-if="tokenAnalysis.signals?.squeeze_alert" class="signal-badge alert">Squeeze Alert</span>
+              <span v-if="tokenAnalysis.signals?.high_rebound_potential" class="signal-badge success">Rebound Potential</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useWebSocket } from '../composables/useWebSocket'
+import SentimentRadar from '../components/charts/SentimentRadar.vue'
+import FundingRateChart from '../components/charts/FundingRateChart.vue'
 
 // --- Crypto types & state ---
 interface Signal {
@@ -415,6 +480,11 @@ interface HotToken {
   open_interest: number
   liquidation_price: number
   heat_score: number
+  // Short analysis fields
+  crowdedness_score?: number
+  squeeze_risk?: number
+  short_risk_rating?: string
+  rebound_potential?: number
 }
 
 const activeTab = ref<'crypto' | 'prediction'>('crypto')
@@ -428,6 +498,9 @@ const hotTokens = ref<HotToken[]>([])
 const htLoading = ref(false)
 const scannerRunning = ref(false)
 const autoTradeEnabled = ref(false)
+const selectedToken = ref<HotToken | null>(null)
+const tokenAnalysis = ref<any>(null)
+const analysisLoading = ref(false)
 
 const pendingCount = computed(() => signals.value.filter(s => s.status === 'pending').length)
 const executedCount = computed(() => signals.value.filter(s => s.status === 'executed').length)
@@ -557,6 +630,8 @@ watch(lastMessage, (msg) => {
     hotTokens.value = msg.data || []
   }
 })
+
+async function fetchHotTokens() {
   htLoading.value = true
   try {
     const resp = await fetch('/api/hot_tokens/?limit=50')
@@ -591,14 +666,21 @@ async function stopScanner() {
   } catch { /* ignore */ }
 }
 
-async function analyzeHotToken(symbol: string) {
+async function openAnalysis(token: HotToken) {
+  selectedToken.value = token
+  analysisLoading.value = true
+  tokenAnalysis.value = null
   try {
-    const resp = await fetch(`/api/hot_tokens/${symbol}/analyze`, { method: 'POST' })
+    const resp = await fetch(`/api/hot_tokens/${token.symbol}/analysis`)
     if (resp.ok) {
-      const data = await resp.json()
-      alert(`Analysis for ${symbol}:\nSentiment: ${data.sentiment}\nConfidence: ${(data.confidence * 100).toFixed(0)}%\nReasoning: ${data.reasoning}`)
+      tokenAnalysis.value = await resp.json()
     }
-  } catch { /* ignore */ }
+  } catch { /* ignore */ } finally { analysisLoading.value = false }
+}
+
+function closeAnalysis() {
+  selectedToken.value = null
+  tokenAnalysis.value = null
 }
 
 async function tradeHotToken(symbol: string) {
@@ -893,6 +975,126 @@ onMounted(() => {
   transition: all 0.2s;
 }
 .btn-close:hover { border-color: #ef4444; color: #ef4444; }
+
+/* Analysis Modal */
+.analysis-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.analysis-panel {
+  background: #111114;
+  border: 1px solid #1e1e24;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 900px;
+  min-width: 700px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+}
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.analysis-header h2 {
+  color: #fff;
+  font-size: 20px;
+  margin: 0;
+}
+.analysis-header .btn-close {
+  width: auto;
+  padding: 4px 12px;
+  font-size: 20px;
+  background: transparent;
+  border: none;
+  color: #71717a;
+  cursor: pointer;
+}
+.analysis-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.analysis-metrics .metric-card {
+  background: #1a1a1f;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.analysis-metrics .metric-card .metric-label {
+  font-size: 12px;
+  color: #71717a;
+  margin-bottom: 8px;
+}
+.analysis-metrics .metric-card .metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+.analysis-metrics .metric-card.extreme { border-color: #ef4444; background: rgba(239,68,68,0.1); }
+.analysis-metrics .metric-card.high { border-color: #f59e0b; background: rgba(245,158,11,0.1); }
+.analysis-metrics .metric-card.medium { border-color: #6366f1; background: rgba(99,102,241,0.1); }
+.analysis-metrics .metric-card.low { border-color: #22c55e; background: rgba(34,197,94,0.1); }
+.analysis-charts {
+  margin-bottom: 20px;
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.analysis-loading {
+  text-align: center;
+  padding: 40px;
+  color: #71717a;
+}
+.analysis-recommendation {
+  background: #1a1a1f;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  padding: 20px;
+}
+.analysis-recommendation h3 {
+  color: #fff;
+  font-size: 16px;
+  margin: 0 0 12px 0;
+}
+.analysis-recommendation p {
+  color: #a1a1aa;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+}
+.signal-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.signal-badge {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+.signal-badge.warning { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.signal-badge.danger { background: rgba(239,68,68,0.15); color: #ef4444; }
+.signal-badge.alert { background: rgba(236,72,153,0.15); color: #ec4899; }
+.signal-badge.success { background: rgba(34,197,94,0.15); color: #22c55e; }
+
+@media (max-width: 768px) {
+  .chart-row { grid-template-columns: 1fr; }
+  .analysis-metrics { grid-template-columns: repeat(2, 1fr); }
+}
 
 /* Prediction specific */
 .status-bar {

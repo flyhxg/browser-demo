@@ -64,13 +64,17 @@ scrape_binance_square_tool: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "scrape_binance_square",
-        "description": "Scrape recent posts from Binance Square (feed/social) for token mentions and sentiment",
+        "description": "Scrape recent posts from Binance Square (feed/social) for token mentions and sentiment. Set use_browser=true when real-time data is required.",
         "parameters": {
             "type": "object",
             "properties": {
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of posts to scrape (default 20)",
+                },
+                "use_browser": {
+                    "type": "boolean",
+                    "description": "Whether to use a real browser to scrape live data (default false, uses simulated data)",
                 }
             },
             "required": [],

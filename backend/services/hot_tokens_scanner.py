@@ -39,6 +39,11 @@ class HotToken:
     heat_score: float = 0.0
     heat_rank: int = 0
     updated_at: Optional[str] = None
+    # Short-selling analysis metrics
+    crowdedness_score: float = 0.0      # 0-1, higher = more crowded shorts
+    squeeze_risk: float = 0.0           # 0-1, higher = short squeeze probability
+    short_risk_rating: str = "neutral"  # "low" / "medium" / "high" / "extreme"
+    rebound_potential: float = 0.0      # 0-1, estimated rebound strength
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +53,9 @@ class HotToken:
 class HotTokensScanner:
     """Scans Binance futures for hot tokens and broadcasts updates."""
 
-    def __init__(self, api_key: str = "", api_secret: str = "", testnet: bool = True):
-        self.exchange = ccxt.binanceusdm({
+    def __init__(self, api_key: str = "", api_secret: str = "", testnet: bool = True, proxy_url: str = ""):
+        self._testnet = testnet
+        exchange_config: dict[str, Any] = {
             "apiKey": api_key,
             "secret": api_secret,
             "enableRateLimit": True,
@@ -57,9 +63,12 @@ class HotTokensScanner:
                 "defaultType": "future",
                 "adjustForTimeDifference": True,
             },
-        })
-        if testnet:
-            self.exchange.set_sandbox_mode(True)
+        }
+        if proxy_url:
+            exchange_config["aiohttp_proxy"] = proxy_url
+        self.exchange = ccxt.binanceusdm(exchange_config)
+        # Use mainnet for public market data (tickers are public API)
+        # testnet is only used for trading with credentials
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -130,10 +139,11 @@ class HotTokensScanner:
         # Filter only USDT futures and calculate metrics
         hot_list: list[HotToken] = []
         for symbol, ticker in tickers.items():
-            if not symbol.endswith("/USDT"):
+            # ccxt returns "BTC/USDT:USDT" for perpetual futures
+            if ":USDT" not in symbol and "/USDT" not in symbol:
                 continue
 
-            base = symbol.replace("/USDT", "")
+            base = symbol.replace("/USDT", "").replace(":USDT", "")
             # Use symbol like "BTCUSDT" for Binance
             binance_symbol = f"{base}USDT"
 
@@ -178,23 +188,49 @@ class HotTokensScanner:
         try:
             # Funding rate
             funding = await self.exchange.fetch_funding_rate(symbol)
+            # ccxt returns: {'info': {...}, 'fundingRate': 0.0001, ...}
             funding_rate = float(funding.get("fundingRate", 0))
         except Exception:
             pass
 
         try:
-            # Long/short account ratio (Binance futures data API)
-            params = {"symbol": symbol, "period": "5m", "limit": 1}
-            ratio_data = await self.exchange.fapiDataGet_globalLongShortAccountRatio(params)
-            if ratio_data:
-                long_short_ratio = float(ratio_data[0].get("longShortRatio", 0))
+            # Open interest - value is in info sub-dict
+            oi_data = await self.exchange.fetch_open_interest(symbol)
+            if oi_data and "info" in oi_data:
+                open_interest = float(oi_data["info"].get("openInterest", 0))
+            elif oi_data:
+                open_interest = float(oi_data.get("openInterest", 0))
         except Exception:
             pass
 
         try:
-            # Open interest
-            oi_data = await self.exchange.fetch_open_interest(symbol)
-            open_interest = float(oi_data.get("openInterest", 0))
+            # Long/short account ratio via direct Binance futures data API
+            # Using exchange's implicit API method: futures_data.topLongShortAccountRatio
+            params = {"symbol": symbol, "period": "5m", "limit": 1}
+            # Try ccxt's internal method for Binance futures data
+            if hasattr(self.exchange, "futures_data_get_topLongShortAccountRatio"):
+                ratio_data = await self.exchange.futures_data_get_topLongShortAccountRatio(params)
+                if ratio_data and len(ratio_data) > 0:
+                    long_short_ratio = float(ratio_data[0].get("longShortRatio", 0))
+            else:
+                # Fallback: use aiohttp directly via internal ccxt session
+                import aiohttp
+                url = "https://fapi.binance.com/futures/data/topLongShortAccountRatio"
+                proxy_url = self.exchange.aiohttp_proxy if hasattr(self.exchange, "aiohttp_proxy") else ""
+                async with aiohttp.ClientSession() as session:
+                    req_params = {"symbol": symbol, "period": "5m", "limit": 1}
+                    if proxy_url:
+                        async with session.get(url, params=req_params, proxy=proxy_url) as resp:
+                            if resp.status == 200:
+                                ratio_data = await resp.json()
+                                if ratio_data and len(ratio_data) > 0:
+                                    long_short_ratio = float(ratio_data[0].get("longShortRatio", 0))
+                    else:
+                        async with session.get(url, params=req_params) as resp:
+                            if resp.status == 200:
+                                ratio_data = await resp.json()
+                                if ratio_data and len(ratio_data) > 0:
+                                    long_short_ratio = float(ratio_data[0].get("longShortRatio", 0))
         except Exception:
             pass
 
@@ -227,6 +263,60 @@ class HotTokensScanner:
                 change_score * 0.3 +
                 funding_score * 0.2
             )
+
+            # --- Short-selling analysis metrics ---
+            self._calculate_short_metrics(token)
+
+    def _calculate_short_metrics(self, token: HotToken) -> None:
+        """Calculate short-selling risk metrics for a token."""
+        # Funding rate: negative = shorts pay longs (crowded short)
+        # Normalize: typical range -0.01 to +0.01 per 8h
+        funding_normalized = max(min(-token.funding_rate / 0.01, 1.0), -1.0)
+
+        # Long/Short ratio: lower = more shorts
+        # Normalize: 0.5 = balanced, <0.5 = short-heavy
+        if token.long_short_ratio > 0:
+            ls_normalized = max(min(1.0 - token.long_short_ratio, 1.0), 0.0)
+        else:
+            ls_normalized = 0.0
+
+        # Price drop: larger drop = higher rebound potential
+        # Normalize: 20% drop = max score
+        drop_normalized = max(min(abs(token.price_change_24h) / 20.0, 1.0), 0.0) if token.price_change_24h < 0 else 0.0
+
+        # Volume confirmation: high volume on drop = more genuine
+        # Already captured in volume_score above
+
+        # Crowdedness score: weighted average of funding and LS ratio
+        # Funding is more direct signal of short crowding
+        token.crowdedness_score = (
+            funding_normalized * 0.6 +
+            ls_normalized * 0.4
+        )
+
+        # Short squeeze risk: high crowdedness + high price drop + high volume
+        token.squeeze_risk = (
+            token.crowdedness_score * 0.5 +
+            drop_normalized * 0.3 +
+            min(token.volume_usd / (max_volume := max(t.volume_usd for t in self._hot_tokens.values()) if self._hot_tokens else 1, 1.0)) * 0.2
+            if self._hot_tokens else token.crowdedness_score * 0.5 + drop_normalized * 0.3
+        )
+        # Fix: simplify squeeze_risk calculation
+        token.squeeze_risk = min(token.crowdedness_score * 0.6 + drop_normalized * 0.4, 1.0)
+
+        # Rebound potential: inverse of crowdedness + price drop momentum
+        token.rebound_potential = min(drop_normalized * 0.7 + token.crowdedness_score * 0.3, 1.0)
+
+        # Risk rating
+        risk = token.crowdedness_score
+        if risk > 0.8:
+            token.short_risk_rating = "extreme"
+        elif risk > 0.6:
+            token.short_risk_rating = "high"
+        elif risk > 0.4:
+            token.short_risk_rating = "medium"
+        else:
+            token.short_risk_rating = "low"
 
     async def _save_to_db(self, tokens: list[HotToken]) -> None:
         """Save hot tokens snapshot to database."""
@@ -271,6 +361,10 @@ class HotTokensScanner:
                 "open_interest": t.open_interest,
                 "liquidation_price": t.liquidation_price,
                 "heat_score": t.heat_score,
+                "crowdedness_score": t.crowdedness_score,
+                "squeeze_risk": t.squeeze_risk,
+                "short_risk_rating": t.short_risk_rating,
+                "rebound_potential": t.rebound_potential,
             }
             for t in tokens
         ]
@@ -319,7 +413,7 @@ class HotTokensScanner:
 
                 # Only trade on bullish signals with high confidence
                 if sentiment == "bullish" and confidence >= self._auto_threshold:
-                    engine = TradingEngine(api_key, api_secret, config.get("binance_testnet", True))
+                    engine = TradingEngine(api_key, api_secret, config.get("binance_testnet", True), config.get("proxy_url", ""))
                     signal = {
                         "token": token.symbol.replace("USDT", ""),
                         "sentiment": "bullish",
@@ -351,5 +445,6 @@ def get_scanner() -> HotTokensScanner:
             api_key=config.get("binance_api_key", ""),
             api_secret=config.get("binance_secret_key", ""),
             testnet=config.get("binance_testnet", True),
+            proxy_url=config.get("proxy_url", ""),
         )
     return _scanner

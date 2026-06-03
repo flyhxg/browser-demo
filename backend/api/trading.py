@@ -103,7 +103,7 @@ async def get_positions() -> dict[str, Any]:
         if not api_key or not api_secret:
             return {"positions": [], "error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet)
+        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
         positions = await trader.get_positions()
         await trader.close()
 
@@ -124,7 +124,7 @@ async def close_position(symbol: str) -> dict[str, Any]:
         if not api_key or not api_secret:
             return {"error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet)
+        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
         result = await trader.close_long(symbol)
         await trader.close()
 
@@ -191,7 +191,7 @@ async def execute_trade(data: dict[str, Any]) -> dict[str, Any]:
         if not api_key or not api_secret:
             return {"error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet)
+        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
 
         signal_id = data.get("signal_id")
         token = data.get("token", "BTC")

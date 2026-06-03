@@ -8,8 +8,8 @@ from services.database import get_db
 class TradingEngine:
     """Handles trade execution with risk management."""
 
-    def __init__(self, api_key: str, secret_key: str, use_testnet: bool = True) -> None:
-        self.trader = create_binance_trader(api_key, secret_key, "futures", use_testnet)
+    def __init__(self, api_key: str, secret_key: str, use_testnet: bool = True, proxy_url: str = "") -> None:
+        self.trader = create_binance_trader(api_key, secret_key, "futures", use_testnet, proxy_url)
         self.use_testnet = use_testnet
 
     async def execute_signal(self, signal: dict[str, Any]) -> dict[str, Any]:

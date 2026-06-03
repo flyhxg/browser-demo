@@ -66,16 +66,45 @@ class AgentGraph:
             f"Available tools: {tools_json}\n\n"
             f"If no tools are needed, respond with an empty array []."
         )
-        result = await llm.ainvoke([UserMessage(content=prompt)])
-        raw = result.completion if hasattr(result, "completion") else str(result)
-        try:
-            selected = json.loads(raw)
-            if isinstance(selected, list):
-                state.selected_tools = selected
-            else:
-                state.selected_tools = []
-        except json.JSONDecodeError:
+        result = await asyncio.wait_for(llm.ainvoke([UserMessage(content=prompt)]), timeout=20.0)
+        raw = result.completion if hasattr(result, "completion") and result.completion else (result.content if hasattr(result, "content") else str(result))
+        selected = self._extract_json_from_text(raw)
+        if isinstance(selected, list):
+            state.selected_tools = selected
+        else:
             state.selected_tools = []
+
+    @staticmethod
+    def _extract_json_from_text(text: str) -> Any:
+        """Extract JSON from text that may contain thinking text prepended."""
+        text = text.strip()
+        # Find first '[' or '{'
+        start_idx = -1
+        for i, ch in enumerate(text):
+            if ch in ('[', '{'):
+                start_idx = i
+                break
+        if start_idx == -1:
+            return []
+        # Find matching end bracket
+        stack = []
+        end_idx = len(text)
+        for i in range(start_idx, len(text)):
+            ch = text[i]
+            if ch in ('[', '{'):
+                stack.append(ch)
+            elif ch in (']', '}'):
+                if not stack:
+                    break
+                stack.pop()
+                if not stack:
+                    end_idx = i + 1
+                    break
+        json_str = text[start_idx:end_idx]
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            return []
 
     async def _execute_tools(self, state: AgentState) -> None:
         if not state.selected_tools:
@@ -101,7 +130,21 @@ class AgentGraph:
 
     async def _summarize(self, state: AgentState) -> None:
         if not state.tool_results:
-            state.summary = "I couldn't determine which tools to use for your request."
+            step = {"step": 4, "description": "Generating direct response..."}
+            state.thinking_steps.append(step)
+            await self._emit("thinking", step)
+
+            llm = create_llm()
+            prompt = (
+                f"You are an AI assistant. Please respond to the user's message directly and helpfully.\n\n"
+                f"User message: {state.user_message}\n\n"
+                f"Response:"
+            )
+            try:
+                result = await asyncio.wait_for(llm.ainvoke([UserMessage(content=prompt)]), timeout=25.0)
+                state.summary = result.completion if hasattr(result, "completion") and result.completion else (result.content if hasattr(result, "content") else str(result))
+            except asyncio.TimeoutError:
+                state.summary = "抱歉，服务响应超时，请稍后再试。"
             return
 
         step = {"step": 4, "description": "Summarizing results..."}
@@ -110,10 +153,52 @@ class AgentGraph:
 
         llm = create_llm()
         results_text = json.dumps(state.tool_results, ensure_ascii=False, indent=2)
+        # 限制结果长度，避免 token 过多导致超时
+        if len(results_text) > 3000:
+            results_text = results_text[:3000] + "...\n[数据已截断]"
         prompt = (
-            f"You are an AI assistant. Summarize the following tool results into a concise, "
-            f"helpful response for the user.\n\nUser request: {state.user_message}\n\n"
-            f"Tool results:\n{results_text}\n\nSummary:"
+            f"请根据以下工具结果，用简洁的语言回答用户的问题。\n\n"
+            f"用户问题: {state.user_message}\n\n"
+            f"工具结果:\n{results_text}\n\n"
+            f"回答:"
         )
-        result = await llm.ainvoke([UserMessage(content=prompt)])
-        state.summary = result.completion if hasattr(result, "completion") else str(result)
+        try:
+            result = await asyncio.wait_for(llm.ainvoke([UserMessage(content=prompt)]), timeout=25.0)
+            state.summary = result.completion if hasattr(result, "completion") and result.completion else (result.content if hasattr(result, "content") else str(result))
+        except asyncio.TimeoutError:
+            # 超时 fallback：直接返回工具结果的简要信息
+            fallback = []
+            for r in state.tool_results:
+                if isinstance(r, dict):
+                    tool_name = r.get("tool", "")
+                    tool_result = r.get("result", {})
+                    if tool_name == "get_price":
+                        symbol = tool_result.get("symbol", "")
+                        data = tool_result.get("data", {})
+                        price = ""
+                        for k, v in data.items():
+                            if isinstance(v, dict) and "usd" in v:
+                                price = f"{v['usd']} USD"
+                                break
+                        if price:
+                            fallback.append(f"{symbol} 当前价格: {price}")
+                    elif tool_name == "get_market_cap":
+                        symbol = tool_result.get("symbol", "")
+                        data = tool_result.get("data", {})
+                        if isinstance(data, list) and len(data) > 0:
+                            item = data[0]
+                            mc = item.get("market_cap", "")
+                            if mc:
+                                fallback.append(f"{symbol} 市值: {mc:,.0f} USD")
+                    elif tool_name == "get_funding_rate":
+                        symbol = tool_result.get("symbol", "")
+                        data = tool_result.get("data", {})
+                        if isinstance(data, list) and len(data) > 0:
+                            item = data[0]
+                            fr = item.get("fundingRate", "")
+                            if fr:
+                                fallback.append(f"{symbol} 资金费率: {fr}")
+            if fallback:
+                state.summary = "\n".join(fallback) + "\n\n（服务响应较慢，以上为工具返回的原始数据）"
+            else:
+                state.summary = "抱歉，服务响应超时，但工具已执行完毕。请重试或稍后再问。"

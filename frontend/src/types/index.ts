@@ -65,8 +65,8 @@ export interface StreamData {
 }
 
 export interface WsMessage {
-  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status' | 'thinking' | 'tool_call_start' | 'tool_call_result' | 'stream'
-  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | ThinkingData | ToolCallStartData | ToolCallResultData | StreamData | Record<string, never>
+  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status' | 'thinking' | 'tool_call_start' | 'tool_call_result' | 'stream' | 'hot_tokens_update'
+  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | ThinkingData | ToolCallStartData | ToolCallResultData | StreamData | HotToken[] | Record<string, never>
   timestamp?: string
 }
 

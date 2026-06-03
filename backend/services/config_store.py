@@ -10,6 +10,7 @@ DEFAULT_CONFIG = {
     "protocol": "anthropic",
     "browser_mode": "local",
     "browser_use_api_key": "",
+    "proxy_url": "",
     "binance_api_key": "",
     "binance_secret_key": "",
     "binance_testnet": True,

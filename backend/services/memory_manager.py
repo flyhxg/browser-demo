@@ -2,7 +2,7 @@ import os
 import json
 import aiofiles
 from filelock import FileLock
-from datetime import datetime
+from datetime import datetime, timezone
 
 MEMORY_BASE = "backend/memory"
 
@@ -23,8 +23,8 @@ def load_token_memory(symbol: str) -> dict:
             return json.load(f)
     return {
         "symbol": symbol.upper(),
-        "first_queried": datetime.utcnow().isoformat() + "Z",
-        "last_queried": datetime.utcnow().isoformat() + "Z",
+        "first_queried": datetime.now(timezone.utc).isoformat(),
+        "last_queried": datetime.now(timezone.utc).isoformat(),
         "user_interests": [],
         "key_levels": {"support": [], "resistance": []},
         "related_sectors": [],
@@ -56,6 +56,6 @@ def update_token_memory(symbol: str, **kwargs) -> dict:
     """Load, update, and save token memory."""
     memory = load_token_memory(symbol)
     memory.update(kwargs)
-    memory["last_queried"] = datetime.utcnow().isoformat() + "Z"
+    memory["last_queried"] = datetime.now(timezone.utc).isoformat()
     save_token_memory(symbol, memory)
     return memory

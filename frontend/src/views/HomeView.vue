@@ -7,7 +7,12 @@
         <span class="model-badge">MiniMax-M2.7</span>
       </div>
       <div class="header-actions">
-        <button class="icon-btn" @click="onReset" title="New Chat">
+        <button class="icon-btn" @click="onClearChat" title="Clear Chat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+        <button class="icon-btn" @click="onReset" title="New Session">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -33,15 +38,18 @@
       <template v-else>
         <MessageCard v-for="(msg, idx) in messages" :key="idx" :msg="msg" />
 
-        <!-- Streaming indicator -->
+        <!-- Loading / Streaming indicator -->
         <div v-if="running" class="message-row assistant streaming">
           <div class="message-avatar">
             <div class="avatar ai">AI</div>
           </div>
           <div class="message-content">
-            <div class="message-bubble assistant">
-              <div class="typing-indicator">
-                <span></span><span></span><span></span>
+            <div class="message-bubble assistant loading-bubble">
+              <div class="loading-indicator">
+                <span class="loading-text">Thinking</span>
+                <div class="loading-dots">
+                  <span></span><span></span><span></span>
+                </div>
               </div>
             </div>
           </div>
@@ -58,6 +66,7 @@
           rows="1"
           :disabled="running"
           @keydown="handleKeydown"
+          @input="autoResize"
           ref="inputRef"
         ></textarea>
         <button
@@ -96,13 +105,15 @@ import { ref, watch, onMounted, nextTick } from 'vue'
 import InteractivePanel from '../components/InteractivePanel.vue'
 import { useAgent } from '../composables/useAgent'
 import { useWebSocket } from '../composables/useWebSocket'
-import type { ExtendedChatMessage } from '../types'
+import type { ExtendedChatMessage, ThinkingStep, ToolCall } from '../types'
 import MessageCard from '../components/MessageCard.vue'
 
 const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask, handleWsMessage } = useAgent()
-const { lastMessage, sendCommand } = useWebSocket()
+const { lastMessage, sendCommand, disconnect, clearSession, newSession, clearSessionId, connect } = useWebSocket()
 
 const messages = ref<ExtendedChatMessage[]>([])
+const currentThinkingSteps = ref<ThinkingStep[]>([])
+const currentToolCalls = ref<ToolCall[]>([])
 const inputText = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -129,6 +140,23 @@ watch(lastMessage, (msg) => {
       message: data.message,
       screenshot: data.screenshot || null,
     }
+  } else if (msg.type === 'thinking') {
+    const data = msg.data as { step: number; description: string }
+    currentThinkingSteps.value.push(data)
+  } else if (msg.type === 'tool_call_start') {
+    const data = msg.data as { tool: string; arguments: Record<string, unknown> }
+    currentToolCalls.value.push({
+      name: data.tool,
+      arguments: data.arguments,
+      status: 'pending',
+    })
+  } else if (msg.type === 'tool_call_result') {
+    const data = msg.data as { tool: string; result: unknown }
+    const tc = currentToolCalls.value.find((t) => t.name === data.tool && t.status === 'pending')
+    if (tc) {
+      tc.status = 'completed'
+      tc.result = data.result
+    }
   } else {
     handleWsMessage(msg)
   }
@@ -142,7 +170,17 @@ watch(lastMessage, (msg) => {
       role: 'assistant',
       text: data.output,
       timestamp: new Date(),
+      thinkingSteps: [...currentThinkingSteps.value],
+      toolCalls: [...currentToolCalls.value],
     })
+    scrollToBottom()
+  } else if (msg.type === 'history') {
+    const data = msg.data as { messages: Array<{ role: string; content: string; created_at?: string }> }
+    messages.value = data.messages.map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      text: m.content,
+      timestamp: new Date(m.created_at || Date.now()),
+    }))
     scrollToBottom()
   }
 })
@@ -161,6 +199,12 @@ function scrollToBottom() {
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function autoResize(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
 }
 
 function sendQuickPrompt(prompt: string) {
@@ -187,6 +231,15 @@ function onSubmit() {
 
   sendCommand(text)
   inputText.value = ''
+  currentThinkingSteps.value = []
+  currentToolCalls.value = []
+  running.value = true
+  nextTick(() => {
+    const el = inputRef.value
+    if (el) {
+      el.style.height = 'auto'
+    }
+  })
   scrollToBottom()
 }
 
@@ -194,9 +247,18 @@ async function onCancel() {
   await cancelTask()
 }
 
+async function onClearChat() {
+  // Clear messages for current session but keep the session itself
+  clearSession()
+  // Clear local UI messages
+  messages.value = []
+}
+
 async function onReset() {
   await resetTask()
   messages.value = []
+  // Create a new session
+  newSession()
 }
 
 async function handleInteractiveInput(data: { input: string; confirmed: boolean }) {
@@ -229,6 +291,8 @@ onMounted(async () => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   overflow: hidden;
   background: #0a0a0f;
 }
@@ -289,8 +353,9 @@ onMounted(async () => {
 .messages-wrapper {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 24px 0;
   min-height: 0;
+  width: 100%;
 }
 
 /* Empty State */
@@ -348,8 +413,10 @@ onMounted(async () => {
   gap: 12px;
   align-items: flex-start;
   animation: fadeIn 0.3s ease;
-  max-width: 800px;
-  margin: 0 auto 20px;
+  width: 100%;
+  margin: 0 0 20px;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 .message-row:last-child {
   margin-bottom: 0;
@@ -387,7 +454,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 70%;
+  max-width: 100%;
 }
 .message-bubble {
   padding: 14px 18px;
@@ -441,12 +508,43 @@ onMounted(async () => {
   40% { transform: scale(1); opacity: 1; }
 }
 
+/* Loading Indicator */
+.loading-bubble {
+  display: flex;
+  align-items: center;
+}
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.loading-text {
+  font-size: 14px;
+  color: #a1a1aa;
+  font-weight: 500;
+}
+.loading-dots {
+  display: flex;
+  gap: 4px;
+}
+.loading-dots span {
+  width: 6px;
+  height: 6px;
+  background: #6366f1;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+
 /* Footer Input */
 .chat-footer {
   padding: 16px 24px 24px;
   border-top: 1px solid #1e1e24;
   background: #111114;
   flex-shrink: 0;
+  width: 100%;
 }
 .input-wrapper {
   display: flex;
@@ -457,8 +555,7 @@ onMounted(async () => {
   border-radius: 16px;
   padding: 8px 8px 8px 16px;
   transition: border-color 0.2s;
-  max-width: 800px;
-  margin: 0 auto;
+  width: 100%;
 }
 .input-wrapper:focus-within {
   border-color: #6366f1;
@@ -474,6 +571,7 @@ textarea {
   line-height: 1.5;
   resize: none;
   max-height: 120px;
+  min-height: 52px;
   padding: 8px 0;
   outline: none;
 }

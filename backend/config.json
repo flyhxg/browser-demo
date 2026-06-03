@@ -4,5 +4,21 @@
   "model": "MiniMax-M2.7",
   "protocol": "openai",
   "browser_mode": "cloud",
-  "browser_use_api_key": "bu_9dQgNL9oBd1xM8RhsUzGC7ipwx1bT3-bHY3shLLUeNk"
+  "browser_use_api_key": "bu_9dQgNL9oBd1xM8RhsUzGC7ipwx1bT3-bHY3shLLUeNk",
+  "proxy_url": "http://127.0.0.1:7890",
+  "binance_api_key": "",
+  "binance_secret_key": "",
+  "binance_testnet": true,
+  "binance_mode": "futures",
+  "trading_enabled": false,
+  "max_position_size_usd": 100.0,
+  "tp_percentage": 5.0,
+  "sl_percentage": 3.0,
+  "min_confidence": 0.7,
+  "scan_interval_minutes": 5,
+  "hot_tokens_enabled": false,
+  "hot_tokens_scan_interval": 60,
+  "hot_tokens_max_results": 50,
+  "hot_tokens_auto_execute": false,
+  "hot_tokens_auto_threshold": 0.8
 }

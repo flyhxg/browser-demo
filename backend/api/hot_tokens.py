@@ -26,6 +26,10 @@ def _token_to_dict(token: Any) -> dict[str, Any]:
         "heat_score": token.heat_score,
         "heat_rank": token.heat_rank,
         "updated_at": token.updated_at,
+        "crowdedness_score": token.crowdedness_score,
+        "squeeze_risk": token.squeeze_risk,
+        "short_risk_rating": token.short_risk_rating,
+        "rebound_potential": token.rebound_potential,
     }
 
 
@@ -121,6 +125,57 @@ async def analyze_token(symbol: str) -> dict[str, Any]:
     analyzer = SignalAnalyzer()
     result = await analyzer.analyze(content)
     return result
+
+
+@router.get("/{symbol}/analysis")
+async def get_token_analysis(symbol: str) -> dict[str, Any]:
+    """Get comprehensive short-selling analysis for a token."""
+    scanner = get_scanner()
+    token = scanner._hot_tokens.get(symbol)
+    if not token:
+        raise HTTPException(status_code=404, detail=f"Token {symbol} not found")
+
+    return {
+        "symbol": token.symbol,
+        "price": token.price,
+        "price_change_24h": token.price_change_24h,
+        "volume_24h": token.volume_24h,
+        "volume_usd": token.volume_usd,
+        "funding_rate": token.funding_rate,
+        "long_short_ratio": token.long_short_ratio,
+        "open_interest": token.open_interest,
+        "liquidation_price": token.liquidation_price,
+        "heat_score": token.heat_score,
+        # Short analysis
+        "crowdedness_score": token.crowdedness_score,
+        "squeeze_risk": token.squeeze_risk,
+        "short_risk_rating": token.short_risk_rating,
+        "rebound_potential": token.rebound_potential,
+        "metrics": {
+            "funding_annualized": token.funding_rate * 3 * 365 * 100,  # Annualized %
+            "oi_usd": token.open_interest * token.price if token.price > 0 else 0,
+        },
+        "signals": {
+            "funding_extreme": abs(token.funding_rate) > 0.01,
+            "overcrowded_short": token.crowdedness_score > 0.7,
+            "squeeze_alert": token.squeeze_risk > 0.6,
+            "high_rebound_potential": token.rebound_potential > 0.7,
+        },
+        "recommendation": _short_recommendation(token),
+    }
+
+
+def _short_recommendation(token: Any) -> str:
+    """Generate short-selling recommendation based on metrics."""
+    if token.short_risk_rating == "extreme":
+        if token.squeeze_risk > 0.7:
+            return "AVOID SHORT - Extreme squeeze risk. Shorts are overcrowded, funding is punitive."
+        return "HIGH RISK - Very crowded short. Consider waiting for better entry."
+    elif token.short_risk_rating == "high":
+        return "MODERATE RISK - Short interest elevated. Watch for squeeze signals."
+    elif token.short_risk_rating == "medium":
+        return "CAUTION - Some short crowding. Monitor funding rate changes."
+    return "LOW RISK - Conditions favorable for short analysis."
 
 
 @router.post("/{symbol}/execute")
