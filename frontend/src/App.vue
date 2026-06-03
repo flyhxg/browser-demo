@@ -18,6 +18,10 @@
           <span class="nav-icon">⚡</span>
           <span class="nav-text">Workflow</span>
         </router-link>
+        <router-link to="/analysis" class="nav-item" :class="{ active: $route.path === '/analysis' }">
+          <span class="nav-icon">📉</span>
+          <span class="nav-text">Short Analysis</span>
+        </router-link>
       </nav>
       <div class="sidebar-footer">
         <span class="footer-text">AI Trading Agent v1.0</span>
