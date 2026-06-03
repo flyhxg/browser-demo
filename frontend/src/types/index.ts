@@ -45,9 +45,29 @@ export interface QueueStatusData {
   pending: number
 }
 
+export interface ThinkingData {
+  step: number
+  description: string
+}
+
+export interface ToolCallStartData {
+  tool: string
+  arguments: Record<string, unknown>
+}
+
+export interface ToolCallResultData {
+  tool: string
+  result: unknown
+}
+
+export interface StreamData {
+  text: string
+}
+
 export interface WsMessage {
-  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status'
-  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | Record<string, never>
+  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status' | 'thinking' | 'tool_call_start' | 'tool_call_result' | 'stream'
+  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | ThinkingData | ToolCallStartData | ToolCallResultData | StreamData | Record<string, never>
+  timestamp?: string
 }
 
 // Task configuration options
@@ -80,4 +100,30 @@ export interface HotToken {
 export interface HotTokensUpdateData {
   type: 'hot_tokens_update'
   data: HotToken[]
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  timestamp: Date
+}
+
+export interface ToolCall {
+  name: string
+  arguments: Record<string, unknown>
+  status: 'pending' | 'completed' | 'error'
+  result?: unknown
+}
+
+export interface ThinkingStep {
+  step: number
+  description: string
+}
+
+export interface ExtendedChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  timestamp: Date
+  toolCalls?: ToolCall[]
+  thinkingSteps?: ThinkingStep[]
 }
