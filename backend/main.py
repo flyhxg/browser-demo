@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.analysis import router as analysis_router
 from api.config import router as config_router
 from api.interactive import router as interactive_router
 from api.tasks import router as tasks_router
@@ -15,6 +16,15 @@ from api.hot_tokens import router as hot_tokens_router
 from api.polymarket import router as polymarket_router
 
 from services.database import init_db
+from services.config_store import get_config
+
+# --- Proxy setup from config ---
+_config = get_config()
+_proxy_url = _config.get("proxy_url", "")
+if _proxy_url:
+    os.environ["HTTP_PROXY"] = _proxy_url
+    os.environ["HTTPS_PROXY"] = _proxy_url
+    print(f"[main] Proxy configured: {_proxy_url}")
 
 app = FastAPI(title="Browser Use Web Demo")
 
@@ -30,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(analysis_router)
 app.include_router(config_router)
 app.include_router(interactive_router)
 app.include_router(tasks_router)

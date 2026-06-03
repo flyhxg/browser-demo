@@ -35,5 +35,21 @@ class WebSocketManager:
                 self.active_connections.remove(conn)
 
 
+    async def send_analysis_short(self, report: dict) -> None:
+        await self.broadcast({"type": "analysis:short", "data": report})
+
+    async def send_signal_new(self, signal: dict) -> None:
+        await self.broadcast({"type": "signal:new", "data": signal})
+
+    async def send_signal_analyzed(self, signal: dict) -> None:
+        await self.broadcast({"type": "signal:analyzed", "data": signal})
+
+    async def send_trade_executed(self, trade: dict) -> None:
+        await self.broadcast({"type": "trade:executed", "data": trade})
+
+    async def send_trade_closed(self, trade: dict) -> None:
+        await self.broadcast({"type": "trade:closed", "data": trade})
+
+
 # Global instance used across the application
 manager = WebSocketManager()
