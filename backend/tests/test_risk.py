@@ -39,3 +39,32 @@ def test_polymarket_returns_known_constants():
     assert cfg.max_position_pct == 1.0
     assert cfg.max_position_usd == 10_000.0
     assert cfg.max_open_positions == 10
+
+
+from services.risk import position_size
+
+
+def _cfg(**overrides) -> RiskConfig:
+    base = dict(max_position_pct=0.02, max_position_usd=100.0, max_open_positions=5,
+                tp_pct=0.05, sl_pct=0.03)
+    base.update(overrides)
+    return RiskConfig(**base)
+
+
+def test_position_size_uses_pct_of_available():
+    assert position_size(1000.0, _cfg(max_position_pct=0.02)) == 20.0
+
+
+def test_position_size_caps_at_max_usd():
+    # 1000 * 0.5 = 500, but cap is 100
+    assert position_size(1000.0, _cfg(max_position_pct=0.5, max_position_usd=100.0)) == 100.0
+
+
+def test_position_size_zero_balance_returns_zero():
+    assert position_size(0.0, _cfg()) == 0.0
+
+
+def test_position_size_polymarket_uses_full_balance_when_under_cap():
+    cfg = RiskConfig.polymarket()
+    # 5000 * 1.0 = 5000, but cap is 10_000, so result is 5000
+    assert position_size(5000.0, cfg) == 5000.0

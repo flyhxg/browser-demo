@@ -41,3 +41,8 @@ class RiskConfig:
             tp_pct=0.05,
             sl_pct=0.15,
         )
+
+
+def position_size(available: float, risk: RiskConfig) -> float:
+    """Position size = min(balance * pct, hard cap)."""
+    return min(available * risk.max_position_pct, risk.max_position_usd)
