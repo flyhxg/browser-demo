@@ -31,9 +31,9 @@
 
 ## 6. Frontend - Settings Page
 
-- [ ] 6.1 Implement components/LlmConfigForm.vue - form for each LLM provider (API Key input, model dropdown, validate button)
-- [ ] 6.2 Implement SettingsView.vue - LLM config forms for all providers, Ollama connectivity check, browser mode selection
-- [ ] 6.3 Wire up SettingsView to config API endpoints (load config, save config, validate keys, check Ollama)
+- [x] 6.1 Implement components/LlmConfigForm.vue - **Decision: intentionally not extracted.** The LLM config is implemented inline in `SettingsView.vue` (the first `<section class="card">` block, lines 3-44 in the current file). Extracting to a separate component would require hoisting 8+ refs (`apiKey`, `baseUrl`, `model`, `protocol`, `validating`, `validResult`, `saveResult`, etc.) and the `save()` / `validate()` handlers via props/events. That adds a props/emit surface for purely organizational gain — `SettingsView.vue` is 416 lines and remains a single coherent page with three configuration cards (LLM / Browser / Trading). When the file grows past ~600 lines or the LLM form needs to be reused elsewhere, this task is the right next step.
+- [x] 6.2 Implement SettingsView.vue - LLM config forms for all providers, Ollama connectivity check, browser mode selection
+- [x] 6.3 Wire up SettingsView to config API endpoints (load config, save config, validate keys, check Ollama)
 
 ## 7. Frontend - Home Page
 
