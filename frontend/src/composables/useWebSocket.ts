@@ -1,5 +1,6 @@
 import { ref, onUnmounted } from 'vue'
 import type { WsMessage } from '../types'
+import { emit as busEmit } from './useMessageBus'
 
 export function useWebSocket() {
   const connected = ref(false)
@@ -20,20 +21,6 @@ export function useWebSocket() {
   function clearSessionId() {
     localStorage.removeItem('chat_session_id')
     offlineBuffer = []
-  }
-
-  function handleMessage(data: any) {
-    if (data.type === 'analysis:short') {
-      console.log('Analysis short received:', data.data)
-    } else if (data.type === 'signal:new') {
-      console.log('New signal:', data.data)
-    } else if (data.type === 'signal:analyzed') {
-      console.log('Signal analyzed:', data.data)
-    } else if (data.type === 'trade:executed') {
-      console.log('Trade executed:', data.data)
-    } else if (data.type === 'trade:closed') {
-      console.log('Trade closed:', data.data)
-    }
   }
 
   function connect() {
@@ -66,8 +53,8 @@ export function useWebSocket() {
         if (parsed.type === 'session_created' && parsed.data?.session_id) {
           setSessionId(parsed.data.session_id)
         }
-        // Handle new event types
-        handleMessage(parsed)
+        // Emit to in-process message bus; consumers subscribe by type.
+        busEmit(parsed)
         // Force reactivity by creating a new object
         lastMessage.value = { ...parsed }
       } catch {
