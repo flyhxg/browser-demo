@@ -193,6 +193,7 @@ class NewsScraper:
             try:
                 page = await context.new_page()
                 await page.goto(url, timeout=15000)
+                await page.wait_for_selector("article", timeout=10000)
                 # Try multiple selectors — different sites use different markup
                 articles = await page.query_selector_all("article")
                 for art in articles[:20]:  # cap raw articles

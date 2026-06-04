@@ -78,6 +78,9 @@ async def test_scraper_handles_site_5xx_returns_from_other_site():
                 raise RuntimeError("503 Service Unavailable")
             return None
 
+        async def wait_for_selector(self, selector: str, timeout: int = 10000):
+            return None
+
         async def query_selector_all(self, selector: str):
             if "theblock" in self._url:
                 html = self._html
@@ -108,3 +111,17 @@ async def test_scraper_handles_site_5xx_returns_from_other_site():
     # The Block succeeded; CoinDesk failed. The Block's event should be in the result.
     sources = [e["source"] for e in events]
     assert "The Block" in sources or "theblock" in [s.lower() for s in sources]
+
+
+@pytest.mark.asyncio
+async def test_scraper_handles_playwright_launch_failure():
+    """If BrowserLauncher.launch() raises, the scraper returns [] without crashing."""
+    from services.datasources.news import NewsScraper
+
+    class FailingLauncher:
+        async def launch(self):
+            raise RuntimeError("browser failed to launch")
+
+    scraper = NewsScraper(browser_launcher=FailingLauncher(), sites=("coindesk", "theblock"))
+    events = await scraper.fetch_news("BTC", time_range="24h", top_n_per_site=5)
+    assert events == []
