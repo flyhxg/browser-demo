@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { StepData, ResultData, ErrorData, TaskOptions, ThinkingStep, ToolCall } from '../types'
+import { defaultSourceFor, hintForResultSource, type SourceHint } from '../utils/toolSources'
 import { on as busOn } from './useMessageBus'
 
 export function useAgent() {
@@ -142,14 +143,24 @@ export function installBusHandlers(agent: AgentBusTarget): Array<() => void> {
       agent.thinkingSteps.value.push({ step: data.step, description: data.description })
     }),
     busOn('tool_call_start', (data) => {
-      agent.toolCalls.value.push({ name: data.tool, arguments: data.arguments, status: 'pending' })
+      const fromServer = (data as { source?: SourceHint }).source
+      const source = fromServer ?? defaultSourceFor(data.tool)
+      agent.toolCalls.value.push({
+        name: data.tool,
+        arguments: data.arguments,
+        status: 'pending',
+        source,
+      })
     }),
     busOn('tool_call_result', (data) => {
       const tc = agent.toolCalls.value.find((t) => t.name === data.tool)
-      if (tc) {
-        tc.status = 'completed'
-        tc.result = data.result
-      }
+      if (!tc) return
+      tc.status = 'completed'
+      tc.result = data.result
+      const override = hintForResultSource(
+        (data.result as { source?: unknown } | null | undefined)?.source,
+      )
+      if (override) tc.source = override
     }),
   ]
 }

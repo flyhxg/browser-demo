@@ -101,4 +101,49 @@ describe('useAgent bus dispatch', () => {
     expect(agent.toolCalls.value[0].status).toBe('completed')
     expect(agent.toolCalls.value[0].result).toEqual({ ok: true })
   })
+
+  it('tool_call_start attaches defaultSourceFor(tc.name) as tc.source', async () => {
+    const agent = freshAgent()
+    emit({ type: 'tool_call_start', data: { tool: 'get_price', arguments: { symbol: 'BTC' } } })
+    await nextTick()
+    expect(agent.toolCalls.value[0].source).toEqual({
+      label: 'Binance Futures',
+      url: 'https://www.binance.com/en/futures',
+    })
+  })
+
+  it('tool_call_start honors server-supplied source when present', async () => {
+    const agent = freshAgent()
+    emit({
+      type: 'tool_call_start',
+      data: { tool: 'get_price', arguments: {}, source: { label: 'Custom', url: 'https://x' } },
+    })
+    await nextTick()
+    expect(agent.toolCalls.value[0].source).toEqual({ label: 'Custom', url: 'https://x' })
+  })
+
+  it('tool_call_result with known result.source overwrites the chip', async () => {
+    const agent = freshAgent()
+    emit({ type: 'tool_call_start', data: { tool: 'get_price', arguments: {} } })
+    emit({ type: 'tool_call_result', data: { tool: 'get_price', result: { source: 'coingecko' } } })
+    await nextTick()
+    expect(agent.toolCalls.value[0].source).toEqual({
+      label: 'CoinGecko',
+      url: 'https://www.coingecko.com',
+    })
+  })
+
+  it('tool_call_result with unknown result.source keeps start-time chip', async () => {
+    const agent = freshAgent()
+    emit({ type: 'tool_call_start', data: { tool: 'scrape_binance_square', arguments: {} } })
+    emit({
+      type: 'tool_call_result',
+      data: { tool: 'scrape_binance_square', result: { source: 'simulated' } },
+    })
+    await nextTick()
+    expect(agent.toolCalls.value[0].source).toEqual({
+      label: 'Binance Square',
+      url: 'https://www.binance.com/en/square',
+    })
+  })
 })
