@@ -8,7 +8,6 @@ export interface AppConfig {
   browser_use_api_key_masked: string
   // Trading config
   binance_api_key_masked: string
-  binance_testnet: boolean
   binance_mode: 'futures' | 'spot'
   trading_enabled: boolean
   max_position_size_usd: number
@@ -105,11 +104,19 @@ export interface ChatMessage {
   timestamp: Date
 }
 
+export interface ToolCallSource {
+  label: string
+  url: string
+}
+
+export type { SourceHint } from '../utils/toolSources'
+
 export interface ToolCall {
   name: string
   arguments: Record<string, unknown>
   status: 'pending' | 'completed' | 'error'
   result?: unknown
+  source?: ToolCallSource
 }
 
 export interface ThinkingStep {
