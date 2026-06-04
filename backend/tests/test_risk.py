@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from services.config_store import DEFAULT_CONFIG
@@ -70,6 +72,26 @@ def test_position_size_caps_at_max_usd():
 
 def test_position_size_zero_balance_returns_zero():
     assert position_size(0.0, _cfg()) == 0.0
+
+
+def test_position_size_negative_balance_returns_negative():
+    # Negative balance: position_size returns a negative number.
+    # The engine's size < min_position_usd check catches this and skips.
+    # This test documents the contract — caller must validate.
+    assert position_size(-100.0, _cfg()) == -2.0
+
+
+def test_position_size_very_large_balance_caps_at_max_usd():
+    # 1e15 * 0.02 = 2e13, must be capped at 100
+    assert position_size(1e15, _cfg()) == 100.0
+
+
+def test_position_size_nan_input_returns_nan():
+    # KNOWN ISSUE: min(NaN, x) is NaN. The engine's size < min check
+    # returns False for NaN, so the engine would NOT skip — leading to
+    # a NaN-sized position. This is caller-responsibility for now.
+    result = position_size(float("nan"), _cfg())
+    assert math.isnan(result)
 
 
 def test_position_size_polymarket_uses_full_balance_when_under_cap():
