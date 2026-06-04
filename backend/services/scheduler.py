@@ -29,14 +29,25 @@ class SignalScanScheduler:
         self._stopped = asyncio.Event()
 
     async def _tick(self) -> None:
-        """One scrape cycle. Always called from `_loop`."""
-        posts = await self.scraper.scrape()
+        """One scrape cycle. Always called from `_loop`. Per-step errors are logged and swallowed."""
+        try:
+            posts = await self.scraper.scrape()
+        except Exception as e:
+            logger.warning(f"[SignalScanScheduler] scrape failed: {e}")
+            return
         if not posts:
             return
-        self.scraper.save_to_db(posts)
+        try:
+            self.scraper.save_to_db(posts)
+        except Exception as e:
+            logger.error(f"[SignalScanScheduler] save_to_db failed: {e}", exc_info=True)
+            return
         if self._ws_broadcast:
             for post in posts:
-                await self._ws_broadcast("signal:new", post)
+                try:
+                    await self._ws_broadcast("signal:new", post)
+                except Exception as e:
+                    logger.warning(f"[SignalScanScheduler] broadcast failed for post: {e}")
 
     def _is_enabled(self) -> bool:
         return bool(self._config_provider().get("signal_scan_enabled", False))

@@ -94,3 +94,18 @@ async def test_tick_noop_on_empty_posts():
     assert scraper.scrape_calls == 1
     assert scraper.save_calls == []
     assert recorded == []
+
+
+@pytest.mark.asyncio
+async def test_tick_survives_scraper_exception():
+    """_tick must swallow scraper exceptions and not propagate them."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper(scrape_raises=RuntimeError("upstream down"))
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config())
+
+    # Should NOT raise
+    await scheduler._tick()
+
+    assert scraper.scrape_calls == 1
+    assert scraper.save_calls == []
