@@ -15,7 +15,11 @@ async def test_e2e_function_calling_flow():
     graph = AgentGraph(event_callback=capture_event)
     state = AgentState(user_message="Check BTC price")
 
-    with patch("services.agent_graph.create_llm") as mock_create_llm:
+    # Patch the symbol's source-of-truth module, not the import site.
+    # agent_graph.py uses `from services.llm_factory import create_llm`,
+    # which creates a local binding — patching `services.agent_graph.create_llm`
+    # would not affect the runtime call to `create_llm()` inside agent_graph.
+    with patch("services.llm_factory.create_llm") as mock_create_llm:
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value.content = (
             '[{"name": "get_price", "arguments": {"symbol": "BTC"}}]'

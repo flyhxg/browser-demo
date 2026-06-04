@@ -4,7 +4,7 @@ from services.llm_factory import create_llm
 from services.tools.definitions import tools_list
 from browser_use.llm.messages import UserMessage
 
-async def test():
+async def main():
     llm = create_llm()
     tools_json = json.dumps(tools_list, ensure_ascii=False)
     prompt = (
@@ -26,4 +26,4 @@ async def test():
     except json.JSONDecodeError as e:
         print('JSON parse error:', e)
 
-asyncio.run(test())
+asyncio.run(main())
