@@ -35,6 +35,7 @@ export type WsMessageType =
   | 'step'
   | 'result'
   | 'error'
+  | 'history'
   | 'cancelled'
   | 'live_url'
   | 'queue_status'
@@ -57,6 +58,7 @@ export interface WsMessageByType {
   'step': StepData
   'result': ResultData
   'error': ErrorData
+  'history': { messages: Array<{ role: 'user' | 'assistant'; content: string; created_at?: string }> }
   'cancelled': null
   'live_url': LiveUrlData
   'queue_status': QueueStatusData

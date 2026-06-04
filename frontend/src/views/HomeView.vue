@@ -174,6 +174,14 @@ busOffs.push(
       toolCalls: [...currentToolCalls.value],
     })
     scrollToBottom()
+  }),
+  busOn('history', (data) => {
+    messages.value = data.messages.map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      text: m.content,
+      timestamp: new Date(m.created_at || Date.now()),
+    }))
+    scrollToBottom()
   })
 )
 
