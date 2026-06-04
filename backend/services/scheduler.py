@@ -28,6 +28,19 @@ class SignalScanScheduler:
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
+    async def stop(self) -> None:
+        """Cancel the loop and wait for the current tick to finish."""
+        if not self._task:
+            return
+        self._stopped.set()
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        self._task = None
+        logger.info("[SignalScanScheduler] stopped")
+
     async def _tick(self) -> None:
         """One scrape cycle. Always called from `_loop`. Per-step errors are logged and swallowed."""
         try:

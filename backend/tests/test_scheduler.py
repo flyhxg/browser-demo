@@ -191,3 +191,32 @@ async def test_start_is_idempotent():
     assert scheduler._task is first_task
 
     await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_running_task():
+    """stop() must cancel the background task and wait for it to finish."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(enabled=True, interval_minutes=0.001))
+
+    await scheduler.start()
+    assert scheduler._task is not None
+
+    await scheduler.stop()
+
+    assert scheduler._task is None
+
+
+@pytest.mark.asyncio
+async def test_stop_noop_when_not_running():
+    """stop() must be safe to call when no task is running."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config())
+
+    # Should not raise
+    await scheduler.stop()
+    assert scheduler._task is None
