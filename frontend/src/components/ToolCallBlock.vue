@@ -1,8 +1,16 @@
 <template>
-  <div class="tool-call-block collapsed" @click="toggle">
+  <div class="tool-call-block" :class="{ collapsed: !isExpanded }" @click="toggle">
     <div class="tool-call-header">
       <span class="tool-icon">🔧</span>
       <span class="tool-name">{{ toolCall.name }}</span>
+      <a
+        v-if="toolCall.source?.url"
+        class="tool-source"
+        :href="toolCall.source.url"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{{ toolCall.source.label }} ↗</a>
+      <span v-else-if="toolCall.source?.label" class="tool-source">{{ toolCall.source.label }}</span>
       <span v-if="toolCall.status === 'pending'" class="tool-spinner"></span>
       <span v-else-if="toolCall.status === 'completed'" class="tool-status completed">✓</span>
       <span v-else class="tool-status error">✗</span>
@@ -10,9 +18,11 @@
     </div>
     <div v-if="isExpanded" class="tool-details">
       <div v-if="toolCall.arguments" class="tool-arguments">
+        <div class="detail-label">Arguments</div>
         <code>{{ JSON.stringify(toolCall.arguments, null, 2) }}</code>
       </div>
       <div v-if="toolCall.result" class="tool-result">
+        <div class="detail-label">Result</div>
         <pre>{{ JSON.stringify(toolCall.result, null, 2) }}</pre>
       </div>
     </div>
@@ -20,16 +30,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { ToolCall } from '../types'
 
-defineProps<{
+const props = defineProps<{
   toolCall: ToolCall
+  isComplete?: boolean
 }>()
 
-const isExpanded = ref(false)
+const isExpanded = ref(!props.isComplete)
+const userToggled = ref(false)
+
+watch(
+  () => props.isComplete,
+  (complete) => {
+    if (complete && !userToggled.value) {
+      isExpanded.value = false
+    }
+  },
+)
 
 function toggle() {
+  userToggled.value = true
   isExpanded.value = !isExpanded.value
 }
 </script>
@@ -43,6 +65,9 @@ function toggle() {
   margin-bottom: 8px;
   cursor: pointer;
   transition: all 0.2s;
+}
+.tool-call-block.collapsed {
+  background: rgba(34, 197, 94, 0.04);
 }
 .tool-call-block:hover {
   background: rgba(34, 197, 94, 0.12);
@@ -88,6 +113,15 @@ function toggle() {
   padding-top: 8px;
   border-top: 1px solid rgba(34, 197, 94, 0.1);
 }
+.detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #22c55e;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
 .tool-arguments code {
   font-size: 11px;
   color: #a1a1aa;
@@ -105,5 +139,22 @@ function toggle() {
   border-radius: 4px;
   overflow-x: auto;
   margin: 0;
+}
+.tool-source {
+  font-size: 10px;
+  font-weight: 500;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-decoration: none;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.tool-source:hover {
+  background: rgba(34, 197, 94, 0.2);
 }
 </style>
