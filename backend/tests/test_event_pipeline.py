@@ -229,3 +229,32 @@ async def test_pipeline_returns_unavailable_summary_on_llm_timeout():
         assert "unavailable" in result["llm_summary"].lower()
     finally:
         ep_mod.LLM_TIMEOUT_SECONDS = original
+
+
+@pytest.mark.asyncio
+async def test_pipeline_lowers_confidence_on_partial_source_failure():
+    """If one source fails, overall_confidence must drop by 0.2."""
+    from services.event_pipeline import EventPipeline
+
+    news = AsyncMock()
+    news.fetch_news = AsyncMock(side_effect=RuntimeError("down"))
+    social = AsyncMock()
+    social.scrape_hot = AsyncMock(return_value=[
+        _make_event("social", "2026-06-03T14:00:00Z", "ok post", severity=2),
+    ])
+    onchain = AsyncMock()
+    onchain.fetch = AsyncMock(return_value=[
+        _make_event("whale", "2026-06-03T14:30:00Z", "whale", severity=3),
+    ])
+    derivatives = AsyncMock()
+    derivatives.fetch = AsyncMock(return_value=[])
+
+    pipeline = EventPipeline(news=news, social=social, onchain=onchain, derivatives=derivatives)
+    result = await pipeline.run("BTC", "24h")
+
+    # 1 source failed (-0.2). Start at 1.0 → 0.8
+    assert result["overall_confidence"] == 0.8
+    assert result["fetched_sources"]["news"] == "failed"
+    assert result["fetched_sources"]["social"] == "ok"
+    # Events from working sources should still be present
+    assert len(result["events"]) >= 1

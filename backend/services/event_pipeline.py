@@ -128,6 +128,7 @@ class EventPipeline:
         self.onchain = onchain
         self.derivatives = derivatives
         self._llm_synthesize = llm_synthesize or self._default_llm
+        self._failed_sources: set[str] = set()  # populated by _safe_fetch
 
     async def run(
         self,
@@ -135,6 +136,7 @@ class EventPipeline:
         time_range: Literal["1h", "4h", "24h", "7d"] = "24h",
     ) -> dict[str, Any]:
         """Fetch → normalize → cap → cluster → synthesize. Returns a dict, never raises."""
+        self._failed_sources = set()
         # Fetch in parallel
         results = await asyncio.gather(
             self._safe_fetch(self.news, "fetch_news", symbol, time_range),
@@ -165,8 +167,22 @@ class EventPipeline:
             logger.warning(f"[EventPipeline] LLM synthesis failed: {e}")
             summary = "LLM synthesis unavailable."
 
-        # Confidence: per spec, no decrement logic in this skeleton — covered in Task 9
-        confidence = 1.0 if all_events else 0.0
+        # Confidence: start at 1.0, decrement per source that raised (-0.2 each).
+        # Empty-but-successful returns are "ok" with no events (not "failed").
+        # Per spec error table.
+        confidence = 1.0
+        source_status = {
+            "news": "failed" if "fetch_news" in self._failed_sources else ("ok" if self.news else "skipped"),
+            "social": "failed" if "scrape_hot" in self._failed_sources else ("ok" if self.social else "skipped"),
+            "onchain": "failed" if "fetch" in self._failed_sources else ("ok" if self.onchain else "skipped"),
+            "derivatives": "failed" if "fetch" in self._failed_sources else ("ok" if self.derivatives else "skipped"),
+        }
+        for status in source_status.values():
+            if status == "failed":
+                confidence -= 0.2
+        if not all_events:
+            confidence = 0.0
+        confidence = max(0.0, confidence)
 
         return {
             "symbol": symbol,
@@ -174,12 +190,7 @@ class EventPipeline:
             "events": [e.to_dict() for e in all_events],
             "llm_summary": summary,
             "overall_confidence": confidence,
-            "fetched_sources": {
-                "news": "ok" if news_events else ("failed" if self.news else "skipped"),
-                "social": "ok" if social_events else ("failed" if self.social else "skipped"),
-                "onchain": "ok" if onchain_events else ("failed" if self.onchain else "skipped"),
-                "derivatives": "ok" if derivatives_events else ("failed" if self.derivatives else "skipped"),
-            },
+            "fetched_sources": source_status,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -194,6 +205,8 @@ class EventPipeline:
             result = await method(*args)
             return result if isinstance(result, list) else []
         except Exception as e:
+            # Stash the failed method name so run() can mark it as "failed" in source_status
+            self._failed_sources.add(method_name)
             logger.warning(f"[EventPipeline] {method_name} failed: {e}")
             return []
 
