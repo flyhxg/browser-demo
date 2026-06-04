@@ -123,6 +123,28 @@ class EventPipeline:
         derivatives=None,
         llm_synthesize: Callable[[str, str, list[dict]], Awaitable[str]] | None = None,
     ):
+        # Defaults are constructed lazily and safely — if any source's
+        # underlying module isn't ready, it's stored as None and run()
+        # marks it "skipped" in fetched_sources. Per the never-raises guarantee.
+        def _try_construct(name: str, factory):
+            try:
+                return factory()
+            except Exception as e:
+                logger.warning(f"[EventPipeline] could not construct default {name}: {e}")
+                return None
+
+        if news is None:
+            from services.datasources.news import NewsScraper
+            news = _try_construct("news", NewsScraper)
+        if social is None:
+            from services.signal_scraper import BinanceSquareScraper
+            social = _try_construct("social", BinanceSquareScraper)
+        if onchain is None:
+            from services.datasources.aggregators import OnchainAggregator
+            onchain = _try_construct("onchain", OnchainAggregator)
+        if derivatives is None:
+            from services.datasources.aggregators import DerivativesAggregator
+            derivatives = _try_construct("derivatives", DerivativesAggregator)
         self.news = news
         self.social = social
         self.onchain = onchain

@@ -109,6 +109,12 @@ class _PlaywrightHandle:
         self.pw = pw
         self.browser = browser
 
+    async def new_context(self):
+        return await self.browser.new_context()
+
+    async def close(self):
+        await self.browser.close()
+
 
 SITE_URLS = {
     "coindesk": "https://www.coindesk.com/",

@@ -158,4 +158,6 @@ class BinanceSquareScraper:
             key=lambda p: p.get("likes", 0) + p.get("comments", 0) * 2,
             reverse=True,
         )
+        for p in filtered:
+            p.setdefault("type", "social")
         return filtered[:top_n]
