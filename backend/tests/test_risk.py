@@ -100,3 +100,10 @@ def test_polymarket_tp_sl_via_polymarket_config():
     # SELL side (bearish): tp=entry*0.95, sl=entry*1.15
     assert take_profit_price(100.0, "bearish", cfg) == 95.0
     assert stop_loss_price(100.0, "bearish", cfg) == pytest.approx(115.0, abs=1e-9)
+
+
+def test_polymarket_sl_tp_matches_legacy_values():
+    """Regression: must equal pre-refactor api/polymarket.py:230-231 defaults (0.15/0.05)."""
+    cfg = RiskConfig.polymarket()
+    assert cfg.sl_pct == 0.15
+    assert cfg.tp_pct == 0.05

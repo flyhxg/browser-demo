@@ -224,11 +224,14 @@ async def start_polymarket_polling() -> dict[str, Any]:
     await _polymarket_poller.start()
 
     # Start position monitor
+    from services.risk import RiskConfig
+
+    _risk = RiskConfig.polymarket()
     _position_monitor = PositionMonitor(
         trader=trader,
         check_interval=30,
-        sl_percentage=config["sl_percentage"] if config else 0.15,
-        tp_percentage=config["tp_percentage"] if config else 0.05,
+        sl_percentage=_risk.sl_pct,
+        tp_percentage=_risk.tp_pct,
     )
     await _position_monitor.start()
 
