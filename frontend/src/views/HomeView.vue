@@ -107,6 +107,7 @@ import { useAgent, installBusHandlers } from '../composables/useAgent'
 import { useWebSocket } from '../composables/useWebSocket'
 import { on as busOn } from '../composables/useMessageBus'
 import type { ExtendedChatMessage, ThinkingStep, ToolCall } from '../types'
+import { defaultSourceFor, hintForResultSource } from '../utils/toolSources'
 import MessageCard from '../components/MessageCard.vue'
 
 const agent = useAgent()
@@ -148,10 +149,13 @@ busOffs.push(
     currentThinkingSteps.value.push(data)
   }),
   busOn('tool_call_start', (data) => {
+    const fromServer = (data as { source?: { label: string; url: string } }).source
+    const source = fromServer && fromServer.label ? fromServer : defaultSourceFor(data.tool)
     currentToolCalls.value.push({
       name: data.tool,
       arguments: data.arguments,
       status: 'pending',
+      source,
     })
   }),
   busOn('tool_call_result', (data) => {
@@ -159,6 +163,10 @@ busOffs.push(
     if (tc) {
       tc.status = 'completed'
       tc.result = data.result
+      const override = hintForResultSource(
+        (data.result as { source?: unknown } | null | undefined)?.source,
+      )
+      if (override) tc.source = override
     }
   })
 )
@@ -459,7 +467,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 100%;
+  max-width: calc(100% - 44px);
+  min-width: 0;
 }
 .message-bubble {
   padding: 14px 18px;
@@ -467,6 +476,9 @@ onUnmounted(() => {
   font-size: 15px;
   line-height: 1.6;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
 }
 .message-bubble.user {
   background: #6366f1;
@@ -636,6 +648,27 @@ textarea::placeholder {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .message-content { max-width: 85%; }
+  .chat-header { padding: 12px 16px; }
+  .header-left h1 { font-size: 14px; }
+  .messages-wrapper { padding: 16px 0; }
+  .message-row { padding: 0 12px; margin: 0 0 16px; }
+  .message-bubble { padding: 10px 14px; font-size: 14px; max-width: calc(100vw - 80px); }
+  .empty-chat { padding: 24px 16px; min-height: 300px; }
+  .empty-chat h2 { font-size: 18px; }
+  .quick-prompts { gap: 6px; max-width: 100%; }
+  .quick-prompt { padding: 8px 12px; font-size: 12px; }
+  .chat-footer { padding: 12px 12px 16px; }
+  .input-wrapper { padding: 6px 6px 6px 12px; }
+  textarea { font-size: 14px; min-height: 44px; }
+  .input-meta { margin-top: 6px; }
+}
+
+@media (max-width: 480px) {
+  .header-actions .icon-btn { width: 28px; height: 28px; }
+  .message-row { gap: 8px; padding: 0 8px; }
+  .avatar { width: 28px; height: 28px; font-size: 11px; }
+  .message-bubble { max-width: calc(100vw - 60px); }
+  .quick-prompt { padding: 6px 10px; font-size: 11px; }
+  textarea { font-size: 13px; }
 }
 </style>

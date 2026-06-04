@@ -4,13 +4,14 @@
       <span class="tool-icon">🔧</span>
       <span class="tool-name">{{ toolCall.name }}</span>
       <a
-        v-if="toolCall.source?.url"
+        v-if="(toolCall.source?.url) || (resolvedSource.url && toolCall.name in TOOL_DEFAULTS)"
         class="tool-source"
-        :href="toolCall.source.url"
+        :href="toolCall.source?.url || resolvedSource.url"
         target="_blank"
         rel="noopener noreferrer"
-      >{{ toolCall.source.label }} ↗</a>
-      <span v-else-if="toolCall.source?.label" class="tool-source">{{ toolCall.source.label }}</span>
+        @click.stop
+      >{{ toolCall.source?.label || resolvedSource.label }} ↗</a>
+      <span v-else-if="toolCall.source?.label || resolvedSource.label" class="tool-source">{{ toolCall.source?.label || resolvedSource.label }}</span>
       <span v-if="toolCall.status === 'pending'" class="tool-spinner"></span>
       <span v-else-if="toolCall.status === 'completed'" class="tool-status completed">✓</span>
       <span v-else class="tool-status error">✗</span>
@@ -30,13 +31,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { ToolCall } from '../types'
+import { TOOL_DEFAULTS, defaultSourceFor } from '../utils/toolSources'
 
 const props = defineProps<{
   toolCall: ToolCall
   isComplete?: boolean
 }>()
+
+const resolvedSource = computed(() => props.toolCall.source ?? defaultSourceFor(props.toolCall.name))
 
 const isExpanded = ref(!props.isComplete)
 const userToggled = ref(false)
