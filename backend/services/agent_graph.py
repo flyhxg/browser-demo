@@ -13,6 +13,53 @@ from browser_use.llm.messages import UserMessage
 logger = logging.getLogger(__name__)
 
 
+def _default_source_for(tool: str) -> dict[str, str]:
+    """Static tool-name → source hint. Mirrors frontend `TOOL_DEFAULTS`."""
+    return {
+        "get_price":             {"label": "Binance Futures", "url": "https://www.binance.com/en/futures"},
+        "get_market_cap":        {"label": "CoinGecko",       "url": "https://www.coingecko.com"},
+        "get_funding_rate":      {"label": "OKX",             "url": "https://www.okx.com"},
+        "scrape_binance_square": {"label": "Binance Square",  "url": "https://www.binance.com/en/square"},
+        "analyze_sentiment":     {"label": "LLM",             "url": ""},
+    }.get(tool, {"label": tool, "url": ""})
+
+
+def _format_history(
+    history: list[dict[str, Any]],
+    max_messages: int = 10,
+    max_chars: int = 2000,
+) -> str:
+    """Render session history as a compact transcript for LLM prompts.
+
+    Truncates to the last N messages and caps total length to avoid
+    blowing up the prompt. Each line is `role: content`; long content
+    is clipped with a marker.
+    """
+    if not history:
+        return ""
+
+    recent = history[-max_messages:] if len(history) > max_messages else history
+    lines: list[str] = []
+    total = 0
+    for msg in recent:
+        role = msg.get("role", "user")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > 400:
+            content = content[:400] + "...[truncated]"
+        line = f"{role.capitalize()}: {content}"
+        if total + len(line) > max_chars:
+            remaining = max_chars - total
+            if remaining > 50:
+                lines.append(line[:remaining] + "...")
+            break
+        lines.append(line)
+        total += len(line) + 1
+
+    return "\n".join(lines)
+
+
 @dataclass
 class AgentState:
     """Mutable state carried through the graph."""
@@ -58,10 +105,17 @@ class AgentGraph:
 
         llm = create_llm()
         tools_json = json.dumps(tools_list, ensure_ascii=False)
+        history_text = _format_history(state.session_context)
+        history_block = (
+            f"Recent conversation:\n{history_text}\n\n"
+            if history_text
+            else ""
+        )
         prompt = (
             f"You are an AI assistant with access to tools. "
-            f"Based on the user's message, select the appropriate tools to call. "
+            f"Based on the user's message and recent conversation, select the appropriate tools to call. "
             f"Respond ONLY with a JSON array of objects, each with 'name' and 'arguments'.\n\n"
+            f"{history_block}"
             f"User message: {state.user_message}\n\n"
             f"Available tools: {tools_json}\n\n"
             f"If no tools are needed, respond with an empty array []."
@@ -117,7 +171,7 @@ class AgentGraph:
         async def run_tool(tool_def: dict[str, Any]) -> dict[str, Any]:
             name = tool_def.get("name", "")
             args = tool_def.get("arguments", {})
-            await self._emit("tool_call_start", {"tool": name, "arguments": args})
+            await self._emit("tool_call_start", {"tool": name, "arguments": args, "source": _default_source_for(name)})
             try:
                 result = await registry.execute(name, args)
             except Exception as e:
@@ -135,9 +189,17 @@ class AgentGraph:
             await self._emit("thinking", step)
 
             llm = create_llm()
+            history_text = _format_history(state.session_context)
+            history_block = (
+                f"Recent conversation:\n{history_text}\n\n"
+                if history_text
+                else ""
+            )
             prompt = (
-                f"You are an AI assistant. Please respond to the user's message directly and helpfully.\n\n"
-                f"User message: {state.user_message}\n\n"
+                f"You are an AI assistant. Respond to the user's latest message in the context of "
+                f"the recent conversation.\n\n"
+                f"{history_block}"
+                f"Latest user message: {state.user_message}\n\n"
                 f"Response:"
             )
             try:
@@ -145,6 +207,9 @@ class AgentGraph:
                 state.summary = result.completion if hasattr(result, "completion") and result.completion else (result.content if hasattr(result, "content") else str(result))
             except asyncio.TimeoutError:
                 state.summary = "抱歉，服务响应超时，请稍后再试。"
+            except Exception as e:
+                logger.warning(f"_summarize (no tool results) failed: {e}")
+                state.summary = "处理请求时出错,请稍后再试。"
             return
 
         step = {"step": 4, "description": "Summarizing results..."}
@@ -156,8 +221,15 @@ class AgentGraph:
         # 限制结果长度，避免 token 过多导致超时
         if len(results_text) > 3000:
             results_text = results_text[:3000] + "...\n[数据已截断]"
+        history_text = _format_history(state.session_context)
+        history_block = (
+            f"Recent conversation:\n{history_text}\n\n"
+            if history_text
+            else ""
+        )
         prompt = (
-            f"请根据以下工具结果，用简洁的语言回答用户的问题。\n\n"
+            f"请根据以下工具结果,用简洁的语言回答用户的问题(参考最近对话上下文)。\n\n"
+            f"{history_block}"
             f"用户问题: {state.user_message}\n\n"
             f"工具结果:\n{results_text}\n\n"
             f"回答:"
