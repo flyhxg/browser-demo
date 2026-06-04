@@ -20,7 +20,6 @@ class TradingEngine:
         risk: RiskConfig,
     ) -> None:
         self.trader = create_binance_trader(api_key, secret_key, "futures", use_testnet, proxy_url)
-        self.use_testnet = use_testnet
         self._risk = risk
 
     async def execute_signal(self, signal: dict[str, Any]) -> dict[str, Any]:
@@ -40,6 +39,10 @@ class TradingEngine:
         if size < self._risk.min_position_usd:
             return {"status": "skipped", "reason": "Position size too small"}
 
+        # count_open_positions reads from the local DB (source-of-truth for "filled" trades),
+        # not self.trader.get_positions(). The two can disagree when a position is open on
+        # Binance but not yet recorded to DB; for those, the /api/trading/positions endpoint
+        # (which still queries Binance) is the source-of-truth for "actually open" positions.
         with closing(get_db()) as conn:
             if count_open_positions(conn) >= self._risk.max_open_positions:
                 return {"status": "skipped", "reason": "Max positions reached"}
