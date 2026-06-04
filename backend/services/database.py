@@ -300,3 +300,30 @@ def init_db() -> None:
 def dict_from_row(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a sqlite Row to a dict."""
     return {key: row[key] for key in row.keys()}
+
+
+def insert_trade(
+    conn: sqlite3.Connection,
+    signal_id: int | None,
+    token: str,
+    side: str,
+    exchange: str,
+    market_type: str,
+    order_id: str,
+    quantity: float,
+    price: float,
+    tp_price: float,
+    sl_price: float,
+    status: str = "filled",
+) -> int:
+    """Insert a trade row, return the new trade id. Caller commits."""
+    cursor = conn.execute(
+        """
+        INSERT INTO trades (signal_id, token, side, exchange, market_type, order_id,
+                            quantity, price, tp_price, sl_price, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (signal_id, token, side, exchange, market_type, order_id,
+         quantity, price, tp_price, sl_price, status),
+    )
+    return cursor.lastrowid
