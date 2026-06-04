@@ -80,3 +80,16 @@ class SignalScanScheduler:
         logger.info(
             f"[SignalScanScheduler] started, interval={self._interval_seconds() / 60:.1f}m"
         )
+
+    async def _loop(self) -> None:
+        """Main loop. Sleeps `_interval_seconds` between ticks. Cancellable via stop()."""
+        while not self._stopped.is_set():
+            await self._tick()
+            try:
+                await asyncio.wait_for(
+                    self._stopped.wait(),
+                    timeout=self._interval_seconds(),
+                )
+                break  # stopped event fired
+            except asyncio.TimeoutError:
+                pass  # normal — sleep elapsed, next tick

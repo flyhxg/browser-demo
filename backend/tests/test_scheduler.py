@@ -220,3 +220,45 @@ async def test_stop_noop_when_not_running():
     # Should not raise
     await scheduler.stop()
     assert scheduler._task is None
+
+
+@pytest.mark.asyncio
+async def test_loop_runs_multiple_ticks_at_configured_interval():
+    """_loop must call _tick repeatedly with the interval from config."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper(posts=[{"content": "x"}])
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=True, interval_minutes=0.001),  # 0.06s
+    )
+
+    await scheduler.start()
+    # 0.06s interval; wait 0.15s → expect ~2 ticks (allow 1-3 for timing slack)
+    await asyncio.sleep(0.15)
+    await scheduler.stop()
+
+    assert scraper.scrape_calls >= 1, f"expected ≥1 ticks, got {scraper.scrape_calls}"
+
+
+@pytest.mark.asyncio
+async def test_loop_picks_up_enabled_toggle():
+    """_loop must NOT tick while disabled, then start ticking when enabled is flipped."""
+    from services.scheduler import SignalScanScheduler
+
+    config = {"signal_scan_enabled": False, "signal_scan_interval_minutes": 0.001}
+    scraper = FakeScraper(posts=[{"content": "x"}])
+    scheduler = SignalScanScheduler(scraper, config_provider=lambda: config)
+
+    await scheduler.start()  # disabled — no task
+    assert scheduler._task is None
+    assert scraper.scrape_calls == 0
+
+    # Flip enabled and start
+    config["signal_scan_enabled"] = True
+    await scheduler.start()
+    assert scheduler._task is not None
+    await asyncio.sleep(0.1)
+    await scheduler.stop()
+
+    assert scraper.scrape_calls >= 1
