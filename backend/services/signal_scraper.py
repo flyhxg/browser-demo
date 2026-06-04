@@ -103,3 +103,53 @@ class BinanceSquareScraper:
 
         conn.commit()
         conn.close()
+
+    async def scrape_hot(
+        self,
+        symbol: str,
+        time_range: str = "24h",
+        top_n: int = 20,
+    ) -> list[dict]:
+        """Return the top-N hottest posts mentioning `symbol` within `time_range`.
+
+        Hotness = likes + comments * 2. Posts with no timestamp are excluded
+        when a time_range is given. Used by the event-driven analysis pipeline.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        hours = {"1h": 1, "4h": 4, "24h": 24, "7d": 24 * 7}.get(time_range, 24)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        all_posts = await self.scrape()
+        symbol_upper = symbol.upper()
+        symbol_name_map = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
+        bare_pattern = re.compile(rf"\b{re.escape(symbol_upper)}\b")
+
+        # Filter: must mention symbol, and be within time range
+        filtered = []
+        for p in all_posts:
+            content = p.get("content", "")
+            upper = content.upper()
+            has_symbol = (
+                f"${symbol_upper}" in upper
+                or f"#{symbol_upper}" in upper
+                or bare_pattern.search(upper) is not None
+            )
+            if not has_symbol:
+                # try full name
+                full_name = symbol_name_map.get(symbol_upper, "")
+                if full_name and full_name not in content.lower():
+                    continue
+            ts_str = p.get("timestamp")
+            if ts_str and time_range:
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    if ts < cutoff:
+                        continue
+                except (ValueError, AttributeError):
+                    continue
+            filtered.append(p)
+
+        # Sort by engagement
+        filtered.sort(key=lambda p: p.get("likes", 0) + p.get("comments", 0) * 2, reverse=True)
+        return filtered[:top_n]
