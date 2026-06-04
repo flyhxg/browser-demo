@@ -46,3 +46,17 @@ class RiskConfig:
 def position_size(available: float, risk: RiskConfig) -> float:
     """Position size = min(balance * pct, hard cap)."""
     return min(available * risk.max_position_pct, risk.max_position_usd)
+
+
+def take_profit_price(entry: float, sentiment: str, risk: RiskConfig) -> float:
+    """Return target price. `sentiment` is 'bullish' (long) or 'bearish' (short)."""
+    if sentiment == "bearish":
+        return entry * (1 - risk.tp_pct)
+    return entry * (1 + risk.tp_pct)
+
+
+def stop_loss_price(entry: float, sentiment: str, risk: RiskConfig) -> float:
+    """Return stop-loss price. For 'bearish', SL is above entry."""
+    if sentiment == "bearish":
+        return entry * (1 + risk.sl_pct)
+    return entry * (1 - risk.sl_pct)

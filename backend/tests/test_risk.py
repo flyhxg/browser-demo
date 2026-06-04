@@ -1,5 +1,7 @@
+import pytest
+
 from services.config_store import DEFAULT_CONFIG
-from services.risk import RiskConfig
+from services.risk import RiskConfig, stop_loss_price, take_profit_price
 
 
 def test_risk_config_is_frozen_dataclass():
@@ -68,3 +70,33 @@ def test_position_size_polymarket_uses_full_balance_when_under_cap():
     cfg = RiskConfig.polymarket()
     # 5000 * 1.0 = 5000, but cap is 10_000, so result is 5000
     assert position_size(5000.0, cfg) == 5000.0
+
+
+def test_take_profit_bullish():
+    cfg = _cfg(tp_pct=0.05)
+    assert take_profit_price(100.0, "bullish", cfg) == 105.0
+
+
+def test_take_profit_bearish():
+    cfg = _cfg(tp_pct=0.05)
+    assert take_profit_price(100.0, "bearish", cfg) == 95.0
+
+
+def test_stop_loss_bullish():
+    cfg = _cfg(sl_pct=0.03)
+    assert stop_loss_price(100.0, "bullish", cfg) == 97.0
+
+
+def test_stop_loss_bearish():
+    cfg = _cfg(sl_pct=0.03)
+    assert stop_loss_price(100.0, "bearish", cfg) == 103.0
+
+
+def test_polymarket_tp_sl_via_polymarket_config():
+    cfg = RiskConfig.polymarket()
+    # BUY side (bullish): tp=entry*1.05, sl=entry*0.85
+    assert take_profit_price(100.0, "bullish", cfg) == 105.0
+    assert stop_loss_price(100.0, "bullish", cfg) == pytest.approx(85.0, abs=1e-9)
+    # SELL side (bearish): tp=entry*0.95, sl=entry*1.15
+    assert take_profit_price(100.0, "bearish", cfg) == 95.0
+    assert stop_loss_price(100.0, "bearish", cfg) == pytest.approx(115.0, abs=1e-9)
