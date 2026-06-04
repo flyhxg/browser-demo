@@ -1,9 +1,11 @@
 """Trading API endpoints."""
 import asyncio
 import json
+from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from services.binance_trader import create_binance_trader
 from services.config_store import get_config
@@ -14,6 +16,20 @@ from services.filter_engine import validate_signal
 from services.signal_analyzer import SignalAnalyzer
 
 router = APIRouter(prefix="/api/trading")
+
+
+class TradeAction(str, Enum):
+    OPEN_LONG = "open_long"
+    CLOSE_LONG = "close_long"
+    OPEN_SHORT = "open_short"
+    CLOSE_SHORT = "close_short"
+
+
+class ExecuteTradeRequest(BaseModel):
+    signal_id: int | None = None
+    token: str = "BTC"
+    action: TradeAction = TradeAction.OPEN_LONG
+    quantity: float = Field(default=0.01, gt=0)
 
 
 @router.get("/signals")
@@ -178,12 +194,11 @@ async def get_positions() -> dict[str, Any]:
         config = get_config()
         api_key = config.get("binance_api_key", "")
         api_secret = config.get("binance_secret_key", "")
-        use_testnet = config.get("binance_testnet", True)
 
         if not api_key or not api_secret:
             return {"positions": [], "error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
+        trader = create_binance_trader(api_key, api_secret, "futures", config.get("proxy_url", ""))
         positions = await trader.get_positions()
         await trader.close()
 
@@ -194,21 +209,29 @@ async def get_positions() -> dict[str, Any]:
 
 @router.post("/positions/{symbol}/close")
 async def close_position(symbol: str) -> dict[str, Any]:
-    """Close a position."""
+    """Close an open position. Looks up direction first; calls close_long or close_short."""
     try:
         config = get_config()
         api_key = config.get("binance_api_key", "")
         api_secret = config.get("binance_secret_key", "")
-        use_testnet = config.get("binance_testnet", True)
 
         if not api_key or not api_secret:
             return {"error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
-        result = await trader.close_long(symbol)
-        await trader.close()
-
-        return {"status": "closed", "order_id": result.order_id}
+        trader = create_binance_trader(api_key, api_secret, "futures", config.get("proxy_url", ""))
+        try:
+            positions = await trader.get_positions()
+            target = next((p for p in positions if p["symbol"] == symbol), None)
+            if not target:
+                return {"error": f"No open position found for {symbol}"}
+            side = target.get("side", "long")
+            if side == "short":
+                result = await trader.close_short(symbol)
+            else:
+                result = await trader.close_long(symbol)
+            return {"status": "closed", "order_id": result.order_id, "side": side}
+        finally:
+            await trader.close()
     except Exception as e:
         return {"error": str(e)}
 
@@ -244,7 +267,7 @@ async def update_trading_config(data: dict[str, Any]) -> dict[str, Any]:
     fields = []
     values = []
     for key, value in data.items():
-        if key in ("binance_api_key", "binance_secret_key", "use_testnet", "max_position_size_usd",
+        if key in ("binance_api_key", "binance_secret_key", "max_position_size_usd",
                   "tp_percentage", "sl_percentage", "min_confidence",
                   "max_daily_loss", "scan_interval_minutes"):
             fields.append(f"{key} = ?")
@@ -260,30 +283,29 @@ async def update_trading_config(data: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/trades")
-async def execute_trade(data: dict[str, Any]) -> dict[str, Any]:
-    """Execute a manual trade."""
+async def execute_trade(req: ExecuteTradeRequest) -> dict[str, Any]:
+    """Execute a manual trade. `action` is one of open_long / close_long / open_short / close_short."""
     try:
         config = get_config()
         api_key = config.get("binance_api_key", "")
         api_secret = config.get("binance_secret_key", "")
-        use_testnet = config.get("binance_testnet", True)
 
         if not api_key or not api_secret:
             return {"error": "Binance API not configured"}
 
-        trader = create_binance_trader(api_key, api_secret, "futures", use_testnet, config.get("proxy_url", ""))
-
-        signal_id = data.get("signal_id")
-        token = data.get("token", "BTC")
-        side = data.get("side", "buy")
-        quantity = data.get("quantity", 0.01)
-
-        if side == "buy":
-            result = await trader.open_long(f"{token}USDT", quantity)
-        else:
-            result = await trader.close_long(f"{token}USDT", quantity)
-
-        await trader.close()
+        trader = create_binance_trader(api_key, api_secret, "futures", config.get("proxy_url", ""))
+        try:
+            symbol = f"{req.token}USDT"
+            if req.action == TradeAction.OPEN_LONG:
+                result = await trader.open_long(symbol, req.quantity)
+            elif req.action == TradeAction.CLOSE_LONG:
+                result = await trader.close_long(symbol, req.quantity)
+            elif req.action == TradeAction.OPEN_SHORT:
+                result = await trader.open_short(symbol, req.quantity)
+            else:  # CLOSE_SHORT
+                result = await trader.close_short(symbol, req.quantity)
+        finally:
+            await trader.close()
 
         # Record in DB
         conn = get_db()
@@ -293,11 +315,11 @@ async def execute_trade(data: dict[str, Any]) -> dict[str, Any]:
             INSERT INTO trades (signal_id, token, side, exchange, market_type, order_id, quantity, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (signal_id, token, side, "binance", "futures", result.order_id, quantity, result.status),
+            (req.signal_id, req.token, req.action.value, "binance", "futures", result.order_id, req.quantity, result.status),
         )
         conn.commit()
         conn.close()
 
-        return {"status": "executed", "order_id": result.order_id}
+        return {"status": "executed", "order_id": result.order_id, "action": req.action.value}
     except Exception as e:
         return {"error": str(e)}
