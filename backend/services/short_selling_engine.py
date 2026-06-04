@@ -1,13 +1,19 @@
 import asyncio
-from typing import List
+import json
+import re
+from typing import Any, List
 from services.datasources.binance_futures import get_24h_ticker, get_funding_rate, get_open_interest, get_long_short_ratio, get_liquidations
 from services.datasources.technical import get_klines, calculate_rsi, calculate_support_resistance
 from services.datasources.arkham import get_exchange_netflow, get_whale_movements
 from services.datasources.whale_alert import get_large_transactions
 from services.datasources.coingecko import get_coin_details
+from services.llm_factory import ProviderNotConfiguredError, create_llm
 from services.memory_manager import load_token_memory, update_token_memory
 from services.database import get_db
-import json
+
+
+VALID_RECOMMENDATIONS = {"strong_short", "weak_short", "neutral", "weak_long", "strong_long"}
+VALID_HORIZONS = {"short_term", "medium_term", "long_term"}
 
 
 class ShortSellingEngine:
@@ -38,17 +44,13 @@ class ShortSellingEngine:
             else:
                 results[dim] = result
 
+        llm_analysis = await self._run_llm_analysis(symbol, dimensions, results)
+
         report = {
             "symbol": symbol.upper(),
             "timestamp": self._now_iso(),
             "dimensions": results,
-            "llm_analysis": {
-                "summary": f"Analysis for {symbol.upper()} across {len(dimensions)} dimensions.",
-                "strengths": [],
-                "risks": [],
-                "confidence": 0.0,
-                "recommendation": "neutral",
-            },
+            "llm_analysis": llm_analysis,
         }
 
         self._persist_report(report, dimensions)
@@ -110,6 +112,117 @@ class ShortSellingEngine:
 
     async def _fetch_sentiment(self, symbol: str) -> dict:
         return {"note": "Sentiment analysis via LLM on social feeds (TODO: integrate Twitter/LunarCrush)"}
+
+    async def _run_llm_analysis(
+        self, symbol: str, dimensions: List[str], results: dict
+    ) -> dict[str, Any]:
+        """Call LLM to produce structured short-selling analysis from fetched data.
+
+        Returns dict with summary / strengths / risks / confidence / recommendation /
+        time_horizon. Falls back to a neutral stub if LLM is unconfigured, times out,
+        or returns unparseable output — never raises.
+        """
+        fallback = {
+            "summary": f"Analysis for {symbol.upper()} across {len(dimensions)} dimensions.",
+            "strengths": [],
+            "risks": [],
+            "confidence": 0.0,
+            "recommendation": "neutral",
+            "time_horizon": "medium_term",
+        }
+
+        try:
+            llm = create_llm()
+        except (ProviderNotConfiguredError, ValueError):
+            return fallback
+
+        compact = self._compact_dimensions(results)
+        prompt = self._build_llm_prompt(symbol, dimensions, compact)
+
+        try:
+            result = await asyncio.wait_for(llm.ainvoke([{"role": "user", "content": prompt}]), timeout=25.0)
+            text = result.completion if isinstance(result.completion, str) else str(result)
+            return self._parse_llm_response(text, fallback)
+        except (asyncio.TimeoutError, Exception):
+            return fallback
+
+    @staticmethod
+    def _compact_dimensions(results: dict) -> dict:
+        """Drop noisy keys to keep the LLM prompt under 3000 chars.
+
+        We strip dicts of None values and any list over 5 items (e.g. whale_movements).
+        """
+        compact: dict = {}
+        for dim, data in results.items():
+            if not isinstance(data, dict):
+                compact[dim] = data
+                continue
+            cleaned: dict = {}
+            for k, v in data.items():
+                if v is None or v == "":
+                    continue
+                if isinstance(v, list) and len(v) > 5:
+                    cleaned[k] = f"<{len(v)} entries>"
+                else:
+                    cleaned[k] = v
+            compact[dim] = cleaned
+        return compact
+
+    @staticmethod
+    def _build_llm_prompt(symbol: str, dimensions: List[str], compact: dict) -> str:
+        data_str = json.dumps(compact, ensure_ascii=False, indent=2)
+        return (
+            f"You are a crypto trading analyst. Given the following multi-dimension "
+            f"market data for {symbol.upper()}, produce a short-selling decision.\n\n"
+            f"Dimensions fetched: {', '.join(dimensions)}\n\n"
+            f"Data:\n{data_str}\n\n"
+            f"Respond ONLY with valid JSON in this exact format:\n"
+            f'{{"summary": "<1-3 sentence analysis>", '
+            f'"strengths": ["<reason supporting the position>"], '
+            f'"risks": ["<reason against the position>"], '
+            f'"confidence": <0.0-1.0>, '
+            f'"recommendation": "<strong_short|weak_short|neutral|weak_long|strong_long>", '
+            f'"time_horizon": "<short_term|medium_term|long_term>"}}'
+        )
+
+    @staticmethod
+    def _parse_llm_response(text: str, fallback: dict) -> dict:
+        """Extract JSON object from LLM text and validate field values."""
+        try:
+            if "```" in text:
+                match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+                if match:
+                    text = match.group(1)
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return fallback
+            data = json.loads(text[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            return fallback
+
+        recommendation = str(data.get("recommendation", "neutral")).strip().lower()
+        if recommendation not in VALID_RECOMMENDATIONS:
+            recommendation = "neutral"
+
+        horizon = str(data.get("time_horizon", "medium_term")).strip().lower()
+        if horizon not in VALID_HORIZONS:
+            horizon = "medium_term"
+
+        try:
+            confidence = float(data.get("confidence", 0.0))
+            confidence = max(0.0, min(1.0, confidence))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        return {
+            "summary": str(data.get("summary", "")).strip() or fallback["summary"],
+            "strengths": list(data.get("strengths") or []),
+            "risks": list(data.get("risks") or []),
+            "confidence": confidence,
+            "recommendation": recommendation,
+            "time_horizon": horizon,
+        }
 
     def _now_iso(self) -> str:
         from datetime import datetime, timezone
