@@ -1,9 +1,16 @@
 """Binance Square signal scraper."""
 import asyncio
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from services.database import get_db
+
+# Full-name map for symbol-to-name expansion in scrape_hot (matches plan spec).
+SYMBOL_FULL_NAMES = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
+
+# time_range string → hours. Unknown values fall back to 24h.
+TIME_RANGE_HOURS = {"1h": 1, "4h": 4, "24h": 24, "7d": 24 * 7}
 
 
 class BinanceSquareScraper:
@@ -112,20 +119,18 @@ class BinanceSquareScraper:
     ) -> list[dict]:
         """Return the top-N hottest posts mentioning `symbol` within `time_range`.
 
-        Hotness = likes + comments * 2. Posts with no timestamp are excluded
-        when a time_range is given. Used by the event-driven analysis pipeline.
+        Hotness = likes + comments * 2. Posts without a timestamp pass the
+        time filter (we can't tell if they're stale). Used by the
+        event-driven analysis pipeline.
         """
-        from datetime import datetime, timedelta, timezone
-
-        hours = {"1h": 1, "4h": 4, "24h": 24, "7d": 24 * 7}.get(time_range, 24)
+        hours = TIME_RANGE_HOURS.get(time_range, 24)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        all_posts = await self.scrape()
+        # Request enough raw posts from scrape() to populate top_n after filtering.
+        all_posts = await self.scrape(limit=top_n)
         symbol_upper = symbol.upper()
-        symbol_name_map = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
         bare_pattern = re.compile(rf"\b{re.escape(symbol_upper)}\b")
 
-        # Filter: must mention symbol, and be within time range
         filtered = []
         for p in all_posts:
             content = p.get("content", "")
@@ -136,8 +141,7 @@ class BinanceSquareScraper:
                 or bare_pattern.search(upper) is not None
             )
             if not has_symbol:
-                # try full name
-                full_name = symbol_name_map.get(symbol_upper, "")
+                full_name = SYMBOL_FULL_NAMES.get(symbol_upper, "")
                 if full_name and full_name not in content.lower():
                     continue
             ts_str = p.get("timestamp")
@@ -150,6 +154,8 @@ class BinanceSquareScraper:
                     continue
             filtered.append(p)
 
-        # Sort by engagement
-        filtered.sort(key=lambda p: p.get("likes", 0) + p.get("comments", 0) * 2, reverse=True)
+        filtered.sort(
+            key=lambda p: p.get("likes", 0) + p.get("comments", 0) * 2,
+            reverse=True,
+        )
         return filtered[:top_n]
