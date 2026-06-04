@@ -1,9 +1,10 @@
 """Trading execution engine with risk management."""
+from contextlib import closing
 from typing import Any
 
 from services.binance_trader import BinanceFuturesTrader, create_binance_trader
-from services.database import get_db
-from services.risk import RiskConfig
+from services.database import count_open_positions, get_db, insert_trade
+from services.risk import RiskConfig, position_size, stop_loss_price, take_profit_price
 
 
 class TradingEngine:
@@ -23,14 +24,7 @@ class TradingEngine:
         self._risk = risk
 
     async def execute_signal(self, signal: dict[str, Any]) -> dict[str, Any]:
-        """Execute a validated trading signal.
-
-        Args:
-            signal: Dict with token, sentiment, confidence, etc.
-
-        Returns:
-            Dict with trade result.
-        """
+        """Execute a validated trading signal using RiskConfig parameters."""
         token = signal.get("token", "")
         sentiment = signal.get("sentiment", "")
 
@@ -39,61 +33,48 @@ class TradingEngine:
 
         symbol = f"{token}USDT"
 
-        # Get account info
         balance_info = await self.trader.get_balance()
         available = balance_info.get("availableBalance", 0)
 
-        # Position sizing (2% of balance, max $100)
-        position_size = min(available * 0.02, 100.0)
-        if position_size < 10:
+        size = position_size(available, self._risk)
+        if size < self._risk.min_position_usd:
             return {"status": "skipped", "reason": "Position size too small"}
 
-        # Check max positions
-        positions = await self.trader.get_positions()
-        if len(positions) >= 5:
-            return {"status": "skipped", "reason": "Max positions reached"}
+        with closing(get_db()) as conn:
+            if count_open_positions(conn) >= self._risk.max_open_positions:
+                return {"status": "skipped", "reason": "Max positions reached"}
 
-        try:
-            # Open long position
-            result = await self.trader.open_long(symbol, position_size)
-            order_id = result.order_id
+            try:
+                result = await self.trader.open_long(symbol, size)
+                order_id = result.order_id
 
-            # Get current price for TP/SL calculation
-            price = await self.trader.get_market_price(symbol)
+                price = await self.trader.get_market_price(symbol)
+                tp_price = take_profit_price(price, sentiment, self._risk)
+                sl_price = stop_loss_price(price, sentiment, self._risk)
 
-            # Calculate TP/SL
-            tp_price = price * 1.05  # 5% take profit
-            sl_price = price * 0.97  # 3% stop loss
+                await self.trader.set_take_profit(symbol, "long", size, tp_price)
+                await self.trader.set_stop_loss(symbol, "long", size, sl_price)
 
-            # Set TP/SL
-            await self.trader.set_take_profit(symbol, "long", position_size, tp_price)
-            await self.trader.set_stop_loss(symbol, "long", position_size, sl_price)
+                insert_trade(
+                    conn,
+                    signal_id=signal.get("signal_id"),
+                    token=token, side="buy", exchange="binance", market_type="futures",
+                    order_id=order_id, quantity=size, price=price,
+                    tp_price=tp_price, sl_price=sl_price,
+                )
+                conn.commit()
 
-            # Record in database
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO trades (signal_id, token, side, exchange, market_type, order_id, quantity, price, tp_price, sl_price, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'filled')
-                """,
-                (signal.get("signal_id"), token, "buy", "binance", "futures", order_id, position_size, price, tp_price, sl_price),
-            )
-            conn.commit()
-            conn.close()
-
-            return {
-                "status": "executed",
-                "order_id": order_id,
-                "symbol": symbol,
-                "quantity": position_size,
-                "price": price,
-                "tp_price": tp_price,
-                "sl_price": sl_price,
-            }
-
-        except Exception as e:
-            return {"status": "error", "reason": str(e)}
+                return {
+                    "status": "executed",
+                    "order_id": order_id,
+                    "symbol": symbol,
+                    "quantity": size,
+                    "price": price,
+                    "tp_price": tp_price,
+                    "sl_price": sl_price,
+                }
+            except Exception as e:
+                return {"status": "error", "reason": str(e)}
 
     async def close_position(self, symbol: str) -> dict[str, Any]:
         """Close a position.
