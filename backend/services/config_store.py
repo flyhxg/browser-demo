@@ -19,6 +19,8 @@ DEFAULT_CONFIG = {
     "max_position_size_usd": 100.0,
     "tp_percentage": 5.0,
     "sl_percentage": 3.0,
+    "position_pct": 0.02,
+    "max_open_positions": 5,
     "min_confidence": 0.7,
     "scan_interval_minutes": 5,
     "hot_tokens_enabled": False,
@@ -66,6 +68,8 @@ def get_masked_config() -> dict:
         "max_position_size_usd": config.get("max_position_size_usd", 100.0),
         "tp_percentage": config.get("tp_percentage", 5.0),
         "sl_percentage": config.get("sl_percentage", 3.0),
+        "position_pct": config.get("position_pct", 0.02),
+        "max_open_positions": config.get("max_open_positions", 5),
         "min_confidence": config.get("min_confidence", 0.7),
         "scan_interval_minutes": config.get("scan_interval_minutes", 5),
         "hot_tokens_enabled": config.get("hot_tokens_enabled", False),
@@ -82,6 +86,7 @@ def update_config(data: dict) -> dict:
         if key in config or key.startswith(("api_key", "base_url", "model", "protocol", "browser_mode",
                                             "browser_use_api_key", "binance_", "trading_enabled",
                                             "max_position_size", "tp_percentage", "sl_percentage",
+                                            "position_pct", "max_open_positions",
                                             "min_confidence", "scan_interval", "hot_tokens_")):
             config[key] = data[key]
     _save_config(config)
@@ -103,6 +108,8 @@ def get_trading_config() -> dict:
         "max_position_size_usd": config.get("max_position_size_usd", 100.0),
         "tp_percentage": config.get("tp_percentage", 5.0),
         "sl_percentage": config.get("sl_percentage", 3.0),
+        "position_pct": config.get("position_pct", 0.02),
+        "max_open_positions": config.get("max_open_positions", 5),
         "min_confidence": config.get("min_confidence", 0.7),
         "scan_interval_minutes": config.get("scan_interval_minutes", 5),
         "hot_tokens_enabled": config.get("hot_tokens_enabled", False),

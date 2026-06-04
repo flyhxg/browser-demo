@@ -7,6 +7,9 @@ from typing import Any
 DB_PATH = Path(__file__).parent.parent / "data" / "trading.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+# A trade with status='filled' is considered "open" until it transitions to 'closed'.
+OPEN_TRADE_STATUS = "filled"
+
 
 def get_db() -> sqlite3.Connection:
     """Get a database connection with row factory."""
@@ -300,3 +303,48 @@ def init_db() -> None:
 def dict_from_row(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a sqlite Row to a dict."""
     return {key: row[key] for key in row.keys()}
+
+
+def insert_trade(
+    conn: sqlite3.Connection,
+    signal_id: int | None,
+    token: str,
+    side: str,
+    exchange: str,
+    market_type: str,
+    order_id: str,
+    quantity: float,
+    price: float,
+    tp_price: float,
+    sl_price: float,
+    status: str = OPEN_TRADE_STATUS,
+) -> int:
+    """Insert a trade row, return the new trade id. Caller commits."""
+    cursor = conn.execute(
+        """
+        INSERT INTO trades (signal_id, token, side, exchange, market_type, order_id,
+                            quantity, price, tp_price, sl_price, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (signal_id, token, side, exchange, market_type, order_id,
+         quantity, price, tp_price, sl_price, status),
+    )
+    return cursor.lastrowid
+
+
+def count_open_positions(conn: sqlite3.Connection) -> int:
+    """Count trades currently in 'filled' state (i.e. not yet closed)."""
+    cursor = conn.execute(
+        "SELECT COUNT(*) FROM trades WHERE status = ?",
+        (OPEN_TRADE_STATUS,),
+    )
+    return cursor.fetchone()[0]
+
+
+def list_open_positions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all currently-open positions as dicts."""
+    cursor = conn.execute(
+        "SELECT * FROM trades WHERE status = ? ORDER BY created_at DESC",
+        (OPEN_TRADE_STATUS,),
+    )
+    return [dict_from_row(row) for row in cursor.fetchall()]

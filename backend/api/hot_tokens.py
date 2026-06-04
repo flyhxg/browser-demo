@@ -30,6 +30,21 @@ def _token_to_dict(token: Any) -> dict[str, Any]:
         "squeeze_risk": token.squeeze_risk,
         "short_risk_rating": token.short_risk_rating,
         "rebound_potential": token.rebound_potential,
+        # Short-selling trade reference
+        "high_24h": token.high_24h,
+        "low_24h": token.low_24h,
+        "atr": token.atr,
+        "oi_usd": token.oi_usd,
+        "recommended_leverage": token.recommended_leverage,
+        "stop_loss_price": token.stop_loss_price,
+        "take_profit_price": token.take_profit_price,
+        "funding_annualized": token.funding_annualized,
+        "short_grade": token.short_grade,
+        # Trend & market context
+        "market_cap": token.market_cap,
+        "consecutive_up_days": token.consecutive_up_days,
+        "trend_strength": token.trend_strength,
+        "sector": token.sector,
     }
 
 
@@ -151,9 +166,24 @@ async def get_token_analysis(symbol: str) -> dict[str, Any]:
         "squeeze_risk": token.squeeze_risk,
         "short_risk_rating": token.short_risk_rating,
         "rebound_potential": token.rebound_potential,
+        # Trade reference
+        "high_24h": token.high_24h,
+        "low_24h": token.low_24h,
+        "atr": token.atr,
+        "oi_usd": token.oi_usd,
+        "recommended_leverage": token.recommended_leverage,
+        "stop_loss_price": token.stop_loss_price,
+        "take_profit_price": token.take_profit_price,
+        "funding_annualized": token.funding_annualized,
+        "short_grade": token.short_grade,
+        # Trend & market context
+        "market_cap": token.market_cap,
+        "consecutive_up_days": token.consecutive_up_days,
+        "trend_strength": token.trend_strength,
+        "sector": token.sector,
         "metrics": {
-            "funding_annualized": token.funding_rate * 3 * 365 * 100,  # Annualized %
-            "oi_usd": token.open_interest * token.price if token.price > 0 else 0,
+            "funding_annualized": token.funding_annualized,
+            "oi_usd": token.oi_usd,
         },
         "signals": {
             "funding_extreme": abs(token.funding_rate) > 0.01,
@@ -191,7 +221,10 @@ async def execute_trade(symbol: str) -> dict[str, Any]:
     api_secret = config.get("binance_secret_key", "")
     use_testnet = config.get("binance_testnet", True)
 
-    engine = TradingEngine(api_key, api_secret, use_testnet)
+    from services.risk import RiskConfig
+
+    risk = RiskConfig.from_config_store()
+    engine = TradingEngine(api_key, api_secret, use_testnet, risk=risk)
 
     signal_dict = {
         "token": token.symbol.replace("USDT", ""),

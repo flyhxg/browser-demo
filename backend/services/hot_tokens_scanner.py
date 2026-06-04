@@ -413,7 +413,10 @@ class HotTokensScanner:
 
                 # Only trade on bullish signals with high confidence
                 if sentiment == "bullish" and confidence >= self._auto_threshold:
-                    engine = TradingEngine(api_key, api_secret, config.get("binance_testnet", True), config.get("proxy_url", ""))
+                    from services.risk import RiskConfig
+
+                    risk = RiskConfig.from_config_store(config)
+                    engine = TradingEngine(api_key, api_secret, config.get("binance_testnet", True), config.get("proxy_url", ""), risk=risk)
                     signal = {
                         "token": token.symbol.replace("USDT", ""),
                         "sentiment": "bullish",

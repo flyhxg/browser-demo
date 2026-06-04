@@ -64,11 +64,8 @@ export interface StreamData {
   text: string
 }
 
-export interface WsMessage {
-  type: 'step' | 'result' | 'error' | 'cancelled' | 'interactive' | 'live_url' | 'queue_status' | 'thinking' | 'tool_call_start' | 'tool_call_result' | 'stream' | 'hot_tokens_update'
-  data: StepData | ResultData | ErrorData | LiveUrlData | QueueStatusData | ThinkingData | ToolCallStartData | ToolCallResultData | StreamData | HotToken[] | Record<string, never>
-  timestamp?: string
-}
+// (Old monolithic WsMessage interface removed — replaced by the
+// discriminated union re-exported from ./ws at the bottom of this file.)
 
 // Task configuration options
 export interface TaskOptions {
@@ -127,3 +124,60 @@ export interface ExtendedChatMessage {
   toolCalls?: ToolCall[]
   thinkingSteps?: ThinkingStep[]
 }
+
+// WebSocket chat interactive payload (used by HomeView chat UI)
+export interface InteractiveCommand {
+  type: string
+  message: string
+  screenshot: string | null
+}
+
+// WebSocket trade execution events
+export interface TradeExecutedData {
+  order_id: string
+  symbol: string
+  side: 'buy' | 'sell'
+  quantity: number
+  price: number
+}
+
+export interface TradeClosedData {
+  symbol: string
+  pnl: number
+  closed_at: string
+}
+
+// WebSocket analysis:short progress events
+export interface AnalysisShortProgress {
+  stage: string
+  progress: number
+}
+
+export interface AnalysisShortComplete {
+  report: TokenAnalysisReport
+}
+
+// Minimal Signal/Report types — arch-refactor-signal-analyzer will
+// produce the full Pydantic-aligned version. We declare the bare
+// shape here so the discriminated union compiles.
+export interface Signal {
+  id: number
+  source: string
+  symbol: string
+  content: string
+  sentiment: 'bullish' | 'bearish' | 'neutral' | null
+  confidence: number
+  created_at: string
+}
+
+export interface TokenAnalysisReport {
+  symbol: string
+  sentiment: 'bullish' | 'bearish' | 'neutral'
+  confidence: number
+  reasoning: string
+  hints?: Record<string, string>
+}
+
+// Re-export for convenience — components can keep importing from
+// './types' as before. The canonical definition lives in ./ws.
+export type { WsMessage, WsMessageType, WsMessageByType } from './ws'

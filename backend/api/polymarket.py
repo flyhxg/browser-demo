@@ -224,11 +224,14 @@ async def start_polymarket_polling() -> dict[str, Any]:
     await _polymarket_poller.start()
 
     # Start position monitor
+    from services.risk import RiskConfig
+
+    _risk = RiskConfig.polymarket()
     _position_monitor = PositionMonitor(
         trader=trader,
         check_interval=30,
-        sl_percentage=config["sl_percentage"] if config else 0.15,
-        tp_percentage=config["tp_percentage"] if config else 0.05,
+        sl_percentage=_risk.sl_pct,
+        tp_percentage=_risk.tp_pct,
     )
     await _position_monitor.start()
 
@@ -338,12 +341,12 @@ async def _execute_signal(signal: ClusterSignal, signal_id: str) -> None:
     )
 
     # Create position
-    if signal.side == "SELL":
-        sl_price = signal.avg_price * 1.15  # 15% stop loss (price goes up)
-        tp_price = signal.avg_price * 0.95    # 5% take profit (price goes down)
-    else:
-        sl_price = signal.avg_price * 0.85  # 15% stop loss (price goes down)
-        tp_price = signal.avg_price * 1.05    # 5% take profit (price goes up)
+    from services.risk import RiskConfig, stop_loss_price, take_profit_price
+
+    _risk = RiskConfig.polymarket()
+    sentiment = "bearish" if signal.side == "SELL" else "bullish"
+    sl_price = stop_loss_price(signal.avg_price, sentiment, _risk)
+    tp_price = take_profit_price(signal.avg_price, sentiment, _risk)
 
     cursor.execute(
         """

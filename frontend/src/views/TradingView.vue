@@ -176,30 +176,30 @@
           <table>
             <thead>
               <tr>
-                <th>Rank</th><th>Symbol</th><th>Price</th><th>24h Chg</th>
-                <th>Volume</th><th>Funding</th><th>Heat</th><th>Risk</th><th>Squeeze</th><th>Actions</th>
+                <th>排名</th><th>币种</th><th>板块</th><th>价格</th><th>24h涨跌</th>
+                <th>24h成交</th><th>资金费率</th><th>热度</th><th>做空评级</th><th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(token, idx) in hotTokens" :key="token.symbol">
                 <td>{{ idx + 1 }}</td>
                 <td>{{ token.symbol }}</td>
+                <td class="sector-cell">{{ token.sector || '其他' }}</td>
                 <td>${{ token.price?.toFixed(2) }}</td>
                 <td :class="token.price_change_24h >= 0 ? 'profit' : 'loss'">
                   {{ token.price_change_24h >= 0 ? '+' : '' }}{{ token.price_change_24h?.toFixed(2) }}%
                 </td>
                 <td>{{ (token.volume_usd / 1e6).toFixed(1) }}M</td>
-                <td>{{ (token.funding_rate * 100)?.toFixed(4) }}%</td>
-                <td>{{ token.heat_score?.toFixed(2) }}</td>
-                <td :class="token.short_risk_rating === 'extreme' ? 'loss' : ''">
-                  {{ (token.short_risk_rating || 'N/A').toUpperCase() }}
+                <td :class="(token.funding_rate || 0) < 0 ? 'profit' : 'loss'">
+                  {{ (token.funding_rate * 100)?.toFixed(4) }}%
                 </td>
-                <td :class="(token.squeeze_risk || 0) > 0.6 ? 'loss' : ''">
-                  {{ token.squeeze_risk !== undefined ? (token.squeeze_risk * 100).toFixed(0) + '%' : 'N/A' }}
+                <td>{{ token.heat_score?.toFixed(2) }}</td>
+                <td :class="['grade-cell', 'grade-' + (token.short_grade || 'B').toLowerCase()]">
+                  {{ token.short_grade || '-' }}
                 </td>
                 <td>
-                  <button class="btn-outline" @click="openAnalysis(token)">Analyze</button>
-                  <button class="btn-accent" @click="tradeHotToken(token.symbol)">Trade</button>
+                  <button class="btn-outline" @click="openAnalysis(token)">分析</button>
+                  <button class="btn-accent" @click="tradeHotToken(token.symbol)">交易</button>
                 </td>
               </tr>
             </tbody>
@@ -377,34 +377,75 @@
     <div v-if="selectedToken" class="analysis-modal" @click.self="closeAnalysis">
       <div class="analysis-panel">
         <div class="analysis-header">
-          <h2>{{ selectedToken.symbol }} Analysis</h2>
+          <div class="header-left">
+            <h2>{{ selectedToken.symbol }}</h2>
+            <span class="header-sector" v-if="selectedToken.sector">{{ selectedToken.sector }}</span>
+            <span class="header-price">${{ (selectedToken.price || 0).toFixed(4) }}</span>
+            <span :class="['header-change', (selectedToken.price_change_24h >= 0 ? 'up' : 'down')]">
+              {{ selectedToken.price_change_24h >= 0 ? '+' : '' }}{{ (selectedToken.price_change_24h || 0).toFixed(2) }}% (24h)
+            </span>
+          </div>
           <button class="btn-close" @click="closeAnalysis">&times;</button>
         </div>
+
+        <!-- 做空决策条 -->
+        <div class="decision-bar" :class="shortRatingClass">
+          <div class="decision-grade">
+            <div class="grade-label">做空评级</div>
+            <div class="grade-value">{{ shortGradeLabel }}</div>
+          </div>
+          <div class="decision-divider"></div>
+          <div class="decision-direction">
+            <div class="direction-label">操作建议</div>
+            <div class="direction-value">{{ directionText }}</div>
+          </div>
+          <div class="decision-divider"></div>
+          <div class="decision-leverage">
+            <div class="leverage-label">建议杠杆</div>
+            <div class="leverage-value">{{ recommendedLeverage }}x</div>
+          </div>
+        </div>
+
         <div class="analysis-content">
+          <!-- 核心指标四卡 -->
           <div class="analysis-metrics">
-            <div class="metric-card" :class="selectedToken.short_risk_rating">
-              <div class="metric-label">Short Risk</div>
-              <div class="metric-value">{{ selectedToken.short_risk_rating?.toUpperCase() || 'N/A' }}</div>
+            <div class="metric-card" :class="fundingColorClass">
+              <div class="metric-label">资金费率 (8h)</div>
+              <div class="metric-value">
+                {{ ((selectedToken.funding_rate || 0) * 100).toFixed(4) }}%
+              </div>
+              <div class="metric-hint">{{ fundingHintText }}</div>
             </div>
             <div class="metric-card">
-              <div class="metric-label">Crowdedness</div>
-              <div class="metric-value">{{ ((selectedToken.crowdedness_score || 0) * 100).toFixed(0) }}%</div>
+              <div class="metric-label">空头拥挤度</div>
+              <div class="metric-value">
+                {{ ((selectedToken.crowdedness_score || 0) * 100).toFixed(0) }}%
+              </div>
+              <div class="metric-hint">{{ crowdHintText }}</div>
+            </div>
+            <div class="metric-card" :class="squeezeClass">
+              <div class="metric-label">轧空风险</div>
+              <div class="metric-value">
+                {{ ((selectedToken.squeeze_risk || 0) * 100).toFixed(0) }}%
+              </div>
+              <div class="metric-hint">{{ squeezeHintText }}</div>
             </div>
             <div class="metric-card">
-              <div class="metric-label">Squeeze Risk</div>
-              <div class="metric-value">{{ ((selectedToken.squeeze_risk || 0) * 100).toFixed(0) }}%</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Rebound</div>
-              <div class="metric-value">{{ ((selectedToken.rebound_potential || 0) * 100).toFixed(0) }}%</div>
+              <div class="metric-label">反弹潜力</div>
+              <div class="metric-value">
+                {{ ((selectedToken.rebound_potential || 0) * 100).toFixed(0) }}%
+              </div>
+              <div class="metric-hint">价格回弹空间估算</div>
             </div>
           </div>
+
+          <!-- 图表区 -->
           <div class="analysis-charts">
             <div class="chart-row">
               <FundingRateChart
                 :funding-rate="selectedToken.funding_rate"
                 width="100%"
-                height="250px"
+                height="280px"
               />
               <SentimentRadar
                 :crowdedness-score="selectedToken.crowdedness_score || 0"
@@ -413,19 +454,79 @@
                 :heat-score="selectedToken.heat_score"
                 :funding-rate="selectedToken.funding_rate"
                 width="100%"
-                height="250px"
+                height="280px"
               />
             </div>
           </div>
-          <div v-if="analysisLoading" class="analysis-loading">Loading detailed analysis...</div>
+
+          <!-- 详细数据条 -->
+          <div class="detail-strip">
+            <div class="strip-item">
+              <span class="strip-label">板块</span>
+              <span class="strip-value">{{ selectedToken.sector || '其他' }}</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">市值(估)</span>
+              <span class="strip-value">${{ marketCapText }}</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">24h成交量</span>
+              <span class="strip-value">${{ ((selectedToken.volume_usd || 0) / 1e6).toFixed(1) }}M</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">持仓量</span>
+              <span class="strip-value">${{ oiUsdText }}</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">多空比</span>
+              <span class="strip-value">{{ (selectedToken.long_short_ratio || 0).toFixed(2) }}</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">24h高/低</span>
+              <span class="strip-value">${{ (selectedToken.high_24h || 0).toFixed(2) }} / ${{ (selectedToken.low_24h || 0).toFixed(2) }}</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">近期趋势</span>
+              <span :class="['strip-value', (selectedToken.consecutive_up_days || 0) >= 0 ? 'profit' : 'loss']">
+                {{ consecutiveDaysText }}
+              </span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">热度</span>
+              <span class="strip-value">{{ (selectedToken.heat_score || 0).toFixed(2) }}</span>
+            </div>
+          </div>
+
+          <!-- 做空参考 -->
+          <div class="short-reference">
+            <div class="ref-card">
+              <div class="ref-label">建议止损价</div>
+              <div class="ref-value">${{ (selectedToken.stop_loss_price || 0).toFixed(4) }}</div>
+            </div>
+            <div class="ref-card">
+              <div class="ref-label">建议止盈价</div>
+              <div class="ref-value profit">${{ (selectedToken.take_profit_price || 0).toFixed(4) }}</div>
+            </div>
+            <div class="ref-card">
+              <div class="ref-label">24h振幅(ATR)</div>
+              <div class="ref-value">${{ (selectedToken.atr || 0).toFixed(4) }}</div>
+            </div>
+            <div class="ref-card">
+              <div class="ref-label">资金费率年化</div>
+              <div class="ref-value">{{ ((selectedToken.funding_annualized || 0)).toFixed(1) }}%</div>
+            </div>
+          </div>
+
+          <!-- 交易建议 -->
+          <div v-if="analysisLoading" class="analysis-loading">正在生成交易建议...</div>
           <div v-else-if="tokenAnalysis" class="analysis-recommendation">
-            <h3>Recommendation</h3>
-            <p>{{ tokenAnalysis.recommendation }}</p>
+            <h3>📋 交易建议</h3>
+            <p class="recommendation-text">{{ tokenAnalysis.recommendation }}</p>
             <div class="signal-badges">
-              <span v-if="tokenAnalysis.signals?.funding_extreme" class="signal-badge warning">Extreme Funding</span>
-              <span v-if="tokenAnalysis.signals?.overcrowded_short" class="signal-badge danger">Overcrowded Short</span>
-              <span v-if="tokenAnalysis.signals?.squeeze_alert" class="signal-badge alert">Squeeze Alert</span>
-              <span v-if="tokenAnalysis.signals?.high_rebound_potential" class="signal-badge success">Rebound Potential</span>
+              <span v-if="tokenAnalysis.signals?.funding_extreme" class="signal-badge warning">⚠ 极端资金费率</span>
+              <span v-if="tokenAnalysis.signals?.overcrowded_short" class="signal-badge danger">🔥 空头过度拥挤</span>
+              <span v-if="tokenAnalysis.signals?.squeeze_alert" class="signal-badge alert">💥 轧空警报</span>
+              <span v-if="tokenAnalysis.signals?.high_rebound_potential" class="signal-badge success">📈 反弹空间大</span>
             </div>
           </div>
         </div>
@@ -435,8 +536,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { useWebSocket } from '../composables/useWebSocket'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { on as busOn } from '../composables/useMessageBus'
 import SentimentRadar from '../components/charts/SentimentRadar.vue'
 import FundingRateChart from '../components/charts/FundingRateChart.vue'
 
@@ -485,6 +586,21 @@ interface HotToken {
   squeeze_risk?: number
   short_risk_rating?: string
   rebound_potential?: number
+  // Trade execution reference
+  high_24h?: number
+  low_24h?: number
+  atr?: number
+  oi_usd?: number
+  recommended_leverage?: number
+  stop_loss_price?: number
+  take_profit_price?: number
+  funding_annualized?: number
+  short_grade?: string
+  // Trend & market context
+  market_cap?: number
+  consecutive_up_days?: number
+  trend_strength?: number
+  sector?: string
 }
 
 const activeTab = ref<'crypto' | 'prediction'>('crypto')
@@ -568,6 +684,99 @@ const pmStatus = ref<PmStatus>({ running: false })
 const pmPendingCount = computed(() => pmSignals.value.filter(s => s.status === 'pending').length)
 const pmExecutedCount = computed(() => pmSignals.value.filter(s => s.status === 'executed').length)
 
+// --- Analysis modal computed ---
+const shortRatingClass = computed(() => {
+  const g = selectedToken.value?.short_grade
+  if (g === 'S') return 'grade-s'
+  if (g === 'A') return 'grade-a'
+  if (g === 'B') return 'grade-b'
+  if (g === 'C') return 'grade-c'
+  if (g === 'D') return 'grade-d'
+  return 'grade-b'
+})
+
+const shortGradeLabel = computed(() => {
+  const g = selectedToken.value?.short_grade
+  if (g === 'S') return 'S · 极佳做空机会'
+  if (g === 'A') return 'A · 良好做空机会'
+  if (g === 'B') return 'B · 中性观望'
+  if (g === 'C') return 'C · 风险偏高'
+  if (g === 'D') return 'D · 不建议做空'
+  return '暂无评级'
+})
+
+const directionText = computed(() => {
+  const g = selectedToken.value?.short_grade
+  if (g === 'S' || g === 'A') return '可考虑做空'
+  if (g === 'B') return '观望为主'
+  return '建议回避'
+})
+
+const recommendedLeverage = computed(() => selectedToken.value?.recommended_leverage ?? 5)
+
+const fundingColorClass = computed(() => {
+  const fr = selectedToken.value?.funding_rate ?? 0
+  if (fr <= -0.005) return 'extreme'  // very negative → extremely crowded short
+  if (fr <= -0.001) return 'high'     // negative → crowded short
+  if (fr >= 0.005) return 'low'       // positive → longs paid (bad for shorts)
+  return 'medium'                     // near zero
+})
+
+const fundingHintText = computed(() => {
+  const fr = selectedToken.value?.funding_rate ?? 0
+  if (fr <= -0.005) return '空头付费给多头 — 极度拥挤'
+  if (fr <= -0.001) return '空头占优,付息中'
+  if (fr >= 0.005) return '多头拥挤,不适合做空'
+  return '资金费率中性'
+})
+
+const crowdHintText = computed(() => {
+  const c = selectedToken.value?.crowdedness_score ?? 0
+  if (c > 0.7) return '空头极度拥挤,警惕轧空'
+  if (c > 0.4) return '空头仓位偏高'
+  if (c > 0.2) return '持仓相对平衡'
+  return '空头仓位较轻'
+})
+
+const squeezeClass = computed(() => {
+  const s = selectedToken.value?.squeeze_risk ?? 0
+  if (s > 0.7) return 'extreme'
+  if (s > 0.5) return 'high'
+  if (s > 0.3) return 'medium'
+  return 'low'
+})
+
+const squeezeHintText = computed(() => {
+  const s = selectedToken.value?.squeeze_risk ?? 0
+  if (s > 0.7) return '轧空风险高,谨慎做空'
+  if (s > 0.5) return '轧空风险中等'
+  if (s > 0.3) return '轧空风险偏低'
+  return '轧空风险低'
+})
+
+const consecutiveDaysText = computed(() => {
+  const d = selectedToken.value?.consecutive_up_days ?? 0
+  if (d > 0) return `连涨 ${d} 天`
+  if (d < 0) return `连跌 ${Math.abs(d)} 天`
+  return '无明显趋势'
+})
+
+const marketCapText = computed(() => {
+  const cap = selectedToken.value?.market_cap ?? 0
+  if (cap >= 1e9) return `${(cap / 1e9).toFixed(2)}B`
+  if (cap >= 1e6) return `${(cap / 1e6).toFixed(1)}M`
+  if (cap >= 1e3) return `${(cap / 1e3).toFixed(1)}K`
+  return `${cap.toFixed(0)}`
+})
+
+const oiUsdText = computed(() => {
+  const oi = selectedToken.value?.oi_usd ?? 0
+  if (oi >= 1e9) return `${(oi / 1e9).toFixed(2)}B`
+  if (oi >= 1e6) return `${(oi / 1e6).toFixed(1)}M`
+  if (oi >= 1e3) return `${(oi / 1e3).toFixed(1)}K`
+  return `${oi.toFixed(0)}`
+})
+
 function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -622,13 +831,13 @@ async function closePosition(symbol: string) {
   } catch { /* ignore */ }
 }
 
-// --- WebSocket ---
-const { lastMessage } = useWebSocket()
+// --- WebSocket (hot tokens) ---
+const hotTokensOff = busOn('hot_tokens_update', (data) => {
+  hotTokens.value = data
+})
 
-watch(lastMessage, (msg) => {
-  if (msg?.type === 'hot_tokens_update') {
-    hotTokens.value = msg.data || []
-  }
+onUnmounted(() => {
+  hotTokensOff()
 })
 
 async function fetchHotTokens() {
@@ -992,11 +1201,18 @@ onMounted(() => {
   border: 1px solid #1e1e24;
   border-radius: 16px;
   width: 100%;
-  max-width: 900px;
-  min-width: 700px;
+  max-width: 1100px;
+  min-width: 800px;
+  min-height: 620px;
   max-height: 90vh;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px;
+  flex-shrink: 0;
+}
+.analysis-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 .analysis-header {
   display: flex;
@@ -1052,6 +1268,7 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  min-height: 320px;
 }
 .analysis-loading {
   text-align: center;
@@ -1090,6 +1307,118 @@ onMounted(() => {
 .signal-badge.danger { background: rgba(239,68,68,0.15); color: #ef4444; }
 .signal-badge.alert { background: rgba(236,72,153,0.15); color: #ec4899; }
 .signal-badge.success { background: rgba(34,197,94,0.15); color: #22c55e; }
+
+/* Header sector badge */
+.header-sector {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  margin-right: 12px;
+}
+.header-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.header-left h2 { font-size: 22px; font-weight: 700; color: #fff; }
+.header-price { font-size: 18px; font-weight: 600; color: #e4e4e7; }
+.header-change.up { color: #22c55e; font-size: 14px; font-weight: 600; }
+.header-change.down { color: #ef4444; font-size: 14px; font-weight: 600; }
+
+/* Decision bar */
+.decision-bar {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #1a1a1f 0%, #15151a 100%);
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  padding: 18px 24px;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+.decision-grade, .decision-direction, .decision-leverage { flex: 1; }
+.grade-label, .direction-label, .leverage-label {
+  font-size: 11px;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.grade-value { font-size: 18px; font-weight: 700; }
+.direction-value { font-size: 18px; font-weight: 600; color: #fff; }
+.leverage-value { font-size: 18px; font-weight: 700; color: #f59e0b; }
+.decision-divider { width: 1px; height: 40px; background: #27272a; }
+.grade-s .grade-value { color: #22c55e; }
+.grade-a .grade-value { color: #84cc16; }
+.grade-b .grade-value { color: #f59e0b; }
+.grade-c .grade-value { color: #f97316; }
+.grade-d .grade-value { color: #ef4444; }
+
+/* Metric hint */
+.analysis-metrics .metric-card .metric-hint {
+  font-size: 11px;
+  color: #71717a;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+/* Detail strip */
+.detail-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  background: #0a0a0f;
+  border: 1px solid #1e1e24;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.strip-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.strip-label {
+  font-size: 11px;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.strip-value { font-size: 14px; font-weight: 600; color: #e4e4e7; word-break: break-all; }
+.strip-value.profit { color: #22c55e; }
+.strip-value.loss { color: #ef4444; }
+
+/* Short reference */
+.short-reference {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.ref-card {
+  background: #1a1a1f;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+.ref-label { font-size: 11px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.ref-value { font-size: 16px; font-weight: 700; color: #fff; }
+.ref-value.profit { color: #22c55e; }
+
+/* Sector cell in table */
+.sector-cell { color: #818cf8; font-size: 12px; }
+.grade-cell {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  text-align: center;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  margin: 0 auto;
+}
+.grade-cell.grade-s { background: rgba(34,197,94,0.18); color: #22c55e; }
+.grade-cell.grade-a { background: rgba(132,204,22,0.18); color: #84cc16; }
+.grade-cell.grade-b { background: rgba(245,158,11,0.18); color: #f59e0b; }
+.grade-cell.grade-c { background: rgba(249,115,22,0.18); color: #f97316; }
+.grade-cell.grade-d { background: rgba(239,68,68,0.18); color: #ef4444; }
 
 @media (max-width: 768px) {
   .chart-row { grid-template-columns: 1fr; }

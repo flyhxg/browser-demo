@@ -101,15 +101,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import InteractivePanel from '../components/InteractivePanel.vue'
-import { useAgent } from '../composables/useAgent'
+import { useAgent, installBusHandlers } from '../composables/useAgent'
 import { useWebSocket } from '../composables/useWebSocket'
+import { on as busOn } from '../composables/useMessageBus'
 import type { ExtendedChatMessage, ThinkingStep, ToolCall } from '../types'
 import MessageCard from '../components/MessageCard.vue'
 
-const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask, handleWsMessage } = useAgent()
-const { lastMessage, sendCommand, disconnect, clearSession, newSession, clearSessionId, connect } = useWebSocket()
+const agent = useAgent()
+const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask } = agent
+const { sendCommand, disconnect, clearSession, newSession, clearSessionId, connect } = useWebSocket()
 
 const messages = ref<ExtendedChatMessage[]>([])
 const currentThinkingSteps = ref<ThinkingStep[]>([])
@@ -131,41 +133,38 @@ const interactiveCommand = ref({
   screenshot: null as string | null,
 })
 
-watch(lastMessage, (msg) => {
-  if (!msg) return
-  if (msg.type === 'interactive') {
-    const data = msg.data as unknown as { type: string; message: string; screenshot: string | null }
+let agentBusOffs: Array<() => void> = []
+const busOffs: Array<() => void> = []
+
+busOffs.push(
+  busOn('interactive', (data) => {
     interactiveCommand.value = {
       type: data.type,
       message: data.message,
       screenshot: data.screenshot || null,
     }
-  } else if (msg.type === 'thinking') {
-    const data = msg.data as { step: number; description: string }
+  }),
+  busOn('thinking', (data) => {
     currentThinkingSteps.value.push(data)
-  } else if (msg.type === 'tool_call_start') {
-    const data = msg.data as { tool: string; arguments: Record<string, unknown> }
+  }),
+  busOn('tool_call_start', (data) => {
     currentToolCalls.value.push({
       name: data.tool,
       arguments: data.arguments,
       status: 'pending',
     })
-  } else if (msg.type === 'tool_call_result') {
-    const data = msg.data as { tool: string; result: unknown }
+  }),
+  busOn('tool_call_result', (data) => {
     const tc = currentToolCalls.value.find((t) => t.name === data.tool && t.status === 'pending')
     if (tc) {
       tc.status = 'completed'
       tc.result = data.result
     }
-  } else {
-    handleWsMessage(msg)
-  }
-})
+  })
+)
 
-watch(lastMessage, (msg) => {
-  if (!msg) return
-  if (msg.type === 'result') {
-    const data = msg.data as { output: string; steps: number; duration_ms: number }
+busOffs.push(
+  busOn('result', (data) => {
     messages.value.push({
       role: 'assistant',
       text: data.output,
@@ -174,16 +173,16 @@ watch(lastMessage, (msg) => {
       toolCalls: [...currentToolCalls.value],
     })
     scrollToBottom()
-  } else if (msg.type === 'history') {
-    const data = msg.data as { messages: Array<{ role: string; content: string; created_at?: string }> }
+  }),
+  busOn('history', (data) => {
     messages.value = data.messages.map((m) => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       text: m.content,
       timestamp: new Date(m.created_at || Date.now()),
     }))
     scrollToBottom()
-  }
-})
+  })
+)
 
 watch(steps, () => {
   scrollToBottom()
@@ -279,9 +278,15 @@ function closeInteractivePanel() {
 }
 
 onMounted(async () => {
+  agentBusOffs = installBusHandlers(agent)
   try {
     await fetch('/api/config')
   } catch { /* ignore */ }
+})
+
+onUnmounted(() => {
+  busOffs.forEach((off) => off())
+  agentBusOffs.forEach((off) => off())
 })
 </script>
 

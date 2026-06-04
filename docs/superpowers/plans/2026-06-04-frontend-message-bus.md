@@ -790,23 +790,42 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 
 - [ ] **Step 2: Add bus subscription lifecycle**
 
-After the existing `const { lastMessage, … } = useWebSocket()` line (around line 112), add:
+> **Plan deviation (from Task 5 review):** `useAgent` does NOT auto-install bus subscriptions. The spec originally had `useAgent` call `installBusHandlers` internally and expose `__busOffs` on the return value, but the test pattern (Task 4) required explicit calls — auto-install would double-register handlers in the test. As a result, `useAgent` returns its original shape (no `__busOffs`), and the consumer must call `installBusHandlers(agent)` explicitly.
+
+Update the imports and the `useAgent` destructure (line 111):
 
 ```typescript
-import { on as busOn } from '../composables/useMessageBus'
-
-const agentOffs = (useAgent() as any).__busOffs as Array<() => void> | undefined
-// Re-fetch agent to access the bus offs we set up inside useAgent
-// (the destructure above already captured them).
+// OLD:
+import { ref, watch, onMounted, nextTick } from 'vue'
+// NEW:
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 ```
 
-Actually, the cleanest path: destructure `__busOffs` from the `useAgent()` call and call them in `onUnmounted`. Update line 111:
+```typescript
+// OLD:
+import { useAgent } from '../composables/useAgent'
+// NEW:
+import { useAgent, installBusHandlers } from '../composables/useAgent'
+```
 
 ```typescript
 // OLD:
 const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask, handleWsMessage } = useAgent()
 // NEW:
-const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask, __busOffs } = useAgent()
+const agent = useAgent()
+const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask } = agent
+// handleWsMessage is no longer needed — bus subscriptions replace it.
+// Use the explicit `agent` reference for installBusHandlers below.
+```
+
+After the existing state declarations (after line 132), declare the agent bus-offs container and install the 9 useAgent subscriptions in `onMounted` (so the setup is tied to component lifecycle):
+
+```typescript
+let agentBusOffs: Array<() => void> = []
+
+onMounted(() => {
+  agentBusOffs = installBusHandlers(agent)
+})
 ```
 
 - [ ] **Step 3: Add 4 `bus.on` calls for the first watch block (interactive + 3 chat events)**
@@ -873,7 +892,7 @@ At the end of the `<script setup>` block (or wherever the existing `onMounted` i
 ```typescript
 onUnmounted(() => {
   busOffs.forEach((off) => off())
-  __busOffs?.forEach((off) => off())
+  agentBusOffs.forEach((off) => off())
 })
 ```
 
