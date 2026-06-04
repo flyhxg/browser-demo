@@ -1,10 +1,8 @@
 import { ref, onUnmounted } from 'vue'
-import type { WsMessage } from '../types'
 import { emit as busEmit } from './useMessageBus'
 
 export function useWebSocket() {
   const connected = ref(false)
-  const lastMessage = ref<WsMessage | null>(null)
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let intentionalClose = false
@@ -55,8 +53,6 @@ export function useWebSocket() {
         }
         // Emit to in-process message bus; consumers subscribe by type.
         busEmit(parsed)
-        // Force reactivity by creating a new object
-        lastMessage.value = { ...parsed }
       } catch {
         // ignore malformed messages
       }
@@ -120,5 +116,5 @@ export function useWebSocket() {
 
   onUnmounted(disconnect)
 
-  return { connected, lastMessage, disconnect, send, sendCommand, clearSession, newSession, clearSessionId, connect }
+  return { connected, disconnect, send, sendCommand, clearSession, newSession, clearSessionId, connect }
 }

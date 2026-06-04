@@ -111,8 +111,7 @@ import MessageCard from '../components/MessageCard.vue'
 
 const agent = useAgent()
 const { steps, running, screenshot, queuePending, liveUrl, cancelTask, resetTask } = agent
-// `handleWsMessage` is no longer needed — bus subscriptions replace it.
-const { lastMessage, sendCommand, disconnect, clearSession, newSession, clearSessionId, connect } = useWebSocket()
+const { sendCommand, disconnect, clearSession, newSession, clearSessionId, connect } = useWebSocket()
 
 const messages = ref<ExtendedChatMessage[]>([])
 const currentThinkingSteps = ref<ThinkingStep[]>([])
