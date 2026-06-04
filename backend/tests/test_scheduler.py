@@ -109,3 +109,17 @@ async def test_tick_survives_scraper_exception():
 
     assert scraper.scrape_calls == 1
     assert scraper.save_calls == []
+
+
+@pytest.mark.asyncio
+async def test_tick_survives_save_exception():
+    """_tick must swallow save_to_db exceptions and not propagate them."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper(posts=[{"content": "x"}], save_raises=RuntimeError("db down"))
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config())
+
+    # Should NOT raise
+    await scheduler._tick()
+
+    assert scraper.save_calls == [[{"content": "x"}]]
