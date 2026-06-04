@@ -315,6 +315,20 @@ def init_db() -> None:
     if "max_positions" in trade_cols:
         cursor.execute("ALTER TABLE trading_config DROP COLUMN max_positions")
 
+    # Migration: add scheduler config columns for Phase 2.4 SignalScanScheduler.
+    # Defaults: signal_scan_enabled=0 (kill switch off — first-deploy safe),
+    # signal_scan_interval_minutes=15 (matches the design's spec default).
+    # Idempotent via PRAGMA table_info check (same pattern as the
+    # max_positions / polymarket SL/TP migrations above).
+    if "signal_scan_enabled" not in trade_cols:
+        cursor.execute(
+            "ALTER TABLE trading_config ADD COLUMN signal_scan_enabled INTEGER DEFAULT 0"
+        )
+    if "signal_scan_interval_minutes" not in trade_cols:
+        cursor.execute(
+            "ALTER TABLE trading_config ADD COLUMN signal_scan_interval_minutes INTEGER DEFAULT 15"
+        )
+
     conn.commit()
     conn.close()
 

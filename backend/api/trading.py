@@ -269,7 +269,8 @@ async def update_trading_config(data: dict[str, Any]) -> dict[str, Any]:
     for key, value in data.items():
         if key in ("binance_api_key", "binance_secret_key", "max_position_size_usd",
                   "tp_percentage", "sl_percentage", "min_confidence",
-                  "max_daily_loss", "scan_interval_minutes"):
+                  "max_daily_loss", "scan_interval_minutes",
+                  "signal_scan_enabled", "signal_scan_interval_minutes"):
             fields.append(f"{key} = ?")
             values.append(value)
 

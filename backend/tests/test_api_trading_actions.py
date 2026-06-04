@@ -197,3 +197,30 @@ def test_execute_trade_without_api_keys_returns_error(client):
     r = client.post("/api/trading/trades", json={"token": "BTC", "action": "open_long"})
     assert r.status_code == 200
     assert r.json() == {"error": "Binance API not configured"}
+
+
+# --- signal scan config (Phase 2.4) ---
+
+
+def test_update_config_persists_signal_scan_enabled(client):
+    """PUT /api/trading/config must persist signal_scan_enabled to the DB."""
+    # Set a known value
+    r = client.put("/api/trading/config", json={"signal_scan_enabled": True})
+    assert r.status_code == 200
+    assert r.json() == {"status": "updated"}
+
+    # Read it back via GET
+    r2 = client.get("/api/trading/config")
+    assert r2.status_code == 200
+    assert r2.json()["config"].get("signal_scan_enabled") in (1, True)
+
+
+def test_update_config_persists_signal_scan_interval(client):
+    """PUT /api/trading/config must persist signal_scan_interval_minutes to the DB."""
+    r = client.put("/api/trading/config", json={"signal_scan_interval_minutes": 7})
+    assert r.status_code == 200
+    assert r.json() == {"status": "updated"}
+
+    r2 = client.get("/api/trading/config")
+    assert r2.status_code == 200
+    assert r2.json()["config"].get("signal_scan_interval_minutes") == 7
