@@ -1,3 +1,5 @@
+import type { SourceHint } from '../utils/toolSources'
+
 export interface AppConfig {
   api_key_masked: string
   base_url: string
@@ -52,6 +54,7 @@ export interface ThinkingData {
 export interface ToolCallStartData {
   tool: string
   arguments: Record<string, unknown>
+  source?: SourceHint
 }
 
 export interface ToolCallResultData {

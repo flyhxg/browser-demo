@@ -146,4 +146,17 @@ describe('useAgent bus dispatch', () => {
       url: 'https://www.binance.com/en/square',
     })
   })
+
+  it('tool_call_start with empty-label server source falls back to default', async () => {
+    const agent = freshAgent()
+    emit({
+      type: 'tool_call_start',
+      data: { tool: 'get_price', arguments: {}, source: { label: '', url: '' } },
+    })
+    await nextTick()
+    expect(agent.toolCalls.value[0].source).toEqual({
+      label: 'Binance Futures',
+      url: 'https://www.binance.com/en/futures',
+    })
+  })
 })
