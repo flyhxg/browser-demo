@@ -69,6 +69,8 @@ export function useAgent() {
   }
 
   function handleWsMessage(msg: { type: string; data: unknown }) {
+    // DEPRECATED — kept for one task (Task 8). All traffic now flows through
+    // installBusHandlers → bus.emit. Will be removed once HomeView is migrated.
     if (msg.type === 'step') {
       const stepData = msg.data as StepData
       const idx = steps.value.findIndex((s) => s.step === stepData.step)
@@ -127,7 +129,6 @@ export function useAgent() {
     resetTask,
     handleWsMessage,
     reset,
-    __busOffs: [] as Array<() => void>,
   }
 }
 
