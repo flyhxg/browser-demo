@@ -341,12 +341,12 @@ async def _execute_signal(signal: ClusterSignal, signal_id: str) -> None:
     )
 
     # Create position
-    if signal.side == "SELL":
-        sl_price = signal.avg_price * 1.15  # 15% stop loss (price goes up)
-        tp_price = signal.avg_price * 0.95    # 5% take profit (price goes down)
-    else:
-        sl_price = signal.avg_price * 0.85  # 15% stop loss (price goes down)
-        tp_price = signal.avg_price * 1.05    # 5% take profit (price goes up)
+    from services.risk import RiskConfig, stop_loss_price, take_profit_price
+
+    _risk = RiskConfig.polymarket()
+    sentiment = "bearish" if signal.side == "SELL" else "bullish"
+    sl_price = stop_loss_price(signal.avg_price, sentiment, _risk)
+    tp_price = take_profit_price(signal.avg_price, sentiment, _risk)
 
     cursor.execute(
         """

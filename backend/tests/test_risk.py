@@ -107,3 +107,14 @@ def test_polymarket_sl_tp_matches_legacy_values():
     cfg = RiskConfig.polymarket()
     assert cfg.sl_pct == 0.15
     assert cfg.tp_pct == 0.05
+
+
+def test_polymarket_execute_signal_sl_tp_math():
+    """Regression: must equal pre-refactor api/polymarket.py:341-346 hardcoded values."""
+    cfg = RiskConfig.polymarket()
+    # SELL (bearish): sl=entry*1.15, tp=entry*0.95 — drift, use approx
+    assert stop_loss_price(100.0, "bearish", cfg) == pytest.approx(115.0, abs=1e-9)
+    assert take_profit_price(100.0, "bearish", cfg) == pytest.approx(95.0, abs=1e-9)
+    # BUY (bullish): sl=entry*0.85, tp=entry*1.05 — drift, use approx
+    assert stop_loss_price(100.0, "bullish", cfg) == pytest.approx(85.0, abs=1e-9)
+    assert take_profit_price(100.0, "bullish", cfg) == pytest.approx(105.0, abs=1e-9)
