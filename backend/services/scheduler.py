@@ -54,3 +54,16 @@ class SignalScanScheduler:
 
     def _interval_seconds(self) -> float:
         return float(self._config_provider().get("signal_scan_interval_minutes", 15)) * 60.0
+
+    async def start(self) -> None:
+        """Start the background scan loop. No-op if disabled in config. Idempotent."""
+        if not self._is_enabled():
+            logger.info("[SignalScanScheduler] disabled in config — not starting")
+            return
+        if self._task and not self._task.done():
+            return  # already running
+        self._stopped.clear()
+        self._task = asyncio.create_task(self._loop(), name="signal-scan-scheduler")
+        logger.info(
+            f"[SignalScanScheduler] started, interval={self._interval_seconds() / 60:.1f}m"
+        )

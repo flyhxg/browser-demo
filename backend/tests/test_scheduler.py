@@ -144,3 +144,50 @@ async def test_tick_survives_ws_broadcast_exception_per_post():
     await scheduler._tick()
 
     assert recorded == [("signal:new", {"content": "a"}), ("signal:new", {"content": "c"})]
+
+
+@pytest.mark.asyncio
+async def test_start_noop_when_disabled_in_config():
+    """start() must not create a task when signal_scan_enabled is False."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(enabled=False))
+
+    await scheduler.start()
+
+    assert scheduler._task is None
+
+
+@pytest.mark.asyncio
+async def test_start_creates_task_when_enabled():
+    """start() must create an asyncio task when enabled."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(enabled=True, interval_minutes=0.001))
+
+    await scheduler.start()
+
+    assert scheduler._task is not None
+    assert not scheduler._task.done()
+
+    # Clean up so the test doesn't leak a background task
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_is_idempotent():
+    """Calling start() twice must not create a second task."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(enabled=True, interval_minutes=0.001))
+
+    await scheduler.start()
+    first_task = scheduler._task
+    await scheduler.start()  # second call
+
+    assert scheduler._task is first_task
+
+    await scheduler.stop()
