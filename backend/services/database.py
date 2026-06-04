@@ -306,6 +306,15 @@ def init_db() -> None:
         if col in poly_cols:
             cursor.execute(f"ALTER TABLE polymarket_config DROP COLUMN {col}")
 
+    # Migration: drop dead max_positions column. The config_store's
+    # max_open_positions is the source-of-truth (read by RiskConfig.from_config_store).
+    # The DB column was never read by any runtime code path, only written via
+    # /api/trading/config (dead write). Idempotent via PRAGMA table_info check.
+    cursor.execute("PRAGMA table_info(trading_config)")
+    trade_cols = {row[1] for row in cursor.fetchall()}
+    if "max_positions" in trade_cols:
+        cursor.execute("ALTER TABLE trading_config DROP COLUMN max_positions")
+
     conn.commit()
     conn.close()
 
