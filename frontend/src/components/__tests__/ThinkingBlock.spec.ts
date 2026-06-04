@@ -28,9 +28,13 @@ describe('ThinkingBlock', () => {
 
   it('preserves user-expanded state when isComplete becomes true', async () => {
     const wrapper = mount(ThinkingBlock, { props: { steps: STEPS, isComplete: false } })
-    // Simulate user clicking header to collapse, then re-expand
-    await wrapper.find('.thinking-header').trigger('click') // collapse
-    await wrapper.find('.thinking-header').trigger('click') // expand
+    // User clicks header to collapse: block should hide details
+    await wrapper.find('.thinking-header').trigger('click')
+    expect(wrapper.find('.thinking-steps').exists()).toBe(false)
+    // User clicks again to re-expand
+    await wrapper.find('.thinking-header').trigger('click')
+    expect(wrapper.find('.thinking-steps').exists()).toBe(true)
+    // Now completion arrives — user has expressed a preference, so block stays open
     await wrapper.setProps({ isComplete: true })
     expect(wrapper.find('.thinking-steps').exists()).toBe(true)
   })
