@@ -32,6 +32,12 @@ LAYER2_KEYWORDS_HINTS = (
     "rsi",
 )
 
+EVENT_QUERY_KEYWORDS = (
+    "why", "为什么", "what happened", "发生了什么",
+    "drop", "pump", "crash", "暴涨", "暴跌", "plunge", "rally",
+    "suddenly", "突然",
+)
+
 
 class IntentRouter:
     """Classify a query and dispatch to Layer 2 or Layer 3."""
@@ -44,12 +50,18 @@ class IntentRouter:
         symbols: list[str] | None,
         dimensions: list[str] | None,
         message: str | None = None,
-    ) -> Literal["layer2", "layer3"]:
+    ) -> Literal["layer2", "layer3", "event"]:
         """Decide which execution layer to use.
 
         Returns "layer2" for the simple fixed-pipeline case,
-        "layer3" for anything requiring LLM planning.
+        "layer3" for anything requiring LLM planning,
+        "event" for event-causality queries ("why did X drop").
         """
+        if message:
+            lower = message.lower()
+            if any(kw in lower for kw in EVENT_QUERY_KEYWORDS):
+                return "event"
+
         symbols = symbols or []
         if len(symbols) != 1:
             return "layer3"
@@ -67,6 +79,20 @@ class IntentRouter:
                 return "layer3"
 
         return "layer2"
+
+    async def route_event(
+        self,
+        symbol: str,
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch an event-shaped query to EventPipeline."""
+        from services.event_pipeline import EventPipeline
+        pipeline = EventPipeline()
+        report = await pipeline.run(symbol, "24h")
+        return {
+            "layer": "event",
+            "report": report,
+        }
 
     async def route(
         self,

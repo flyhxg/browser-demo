@@ -32,22 +32,23 @@ def test_classify_nonstandard_dimension_is_layer3():
     assert layer == "layer3"
 
 
-def test_classify_why_question_is_layer3():
+def test_classify_why_question_is_event():
+    """'why' questions now route to the event layer (Phase 2.2.3)."""
     layer = IntentRouter.classify(
         symbols=["BTC"],
         dimensions=["derivatives", "onchain"],
         message="why did BTC drop today?",
     )
-    assert layer == "layer3"
+    assert layer == "event"
 
 
-def test_classify_chinese_why_question_is_layer3():
+def test_classify_chinese_why_question_is_event():
     layer = IntentRouter.classify(
         symbols=["BTC"],
         dimensions=["derivatives", "onchain"],
         message="为什么 BTC 今天突然暴跌？",
     )
-    assert layer == "layer3"
+    assert layer == "event"
 
 
 def test_classify_sector_question_is_layer3():
