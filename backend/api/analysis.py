@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from services.short_selling_engine import ShortSellingEngine
+from services.event_pipeline import EventPipeline
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis"])
 engine = ShortSellingEngine()
@@ -16,6 +17,10 @@ class CompareRequest(BaseModel):
     symbols: List[str]
     dimensions: Optional[List[str]] = None
     sort_by: Optional[str] = None
+
+class AnalyzeEventsRequest(BaseModel):
+    symbol: str
+    time_range: Optional[str] = "24h"
 
 @router.post("/short")
 async def analyze_short(req: AnalyzeShortRequest):
@@ -49,3 +54,25 @@ async def get_cached_report(symbol: str):
         return dict(row)
     finally:
         conn.close()
+
+@router.post("/events")
+async def analyze_events(req: AnalyzeEventsRequest):
+    """Run the event-causality pipeline for a single symbol.
+
+    Returns a structured event timeline + LLM-written causal narrative
+    with a confidence score. Combines news (CoinDesk + The Block via
+    Playwright), social (Binance Square top-N hottest), on-chain
+    (whale transfers), and derivatives (liquidations + funding rate
+    shifts) into one response.
+    """
+    valid_ranges = {"1h", "4h", "24h", "7d"}
+    if req.time_range not in valid_ranges:
+        raise HTTPException(
+            status_code=400,
+            detail=f"time_range must be one of {sorted(valid_ranges)}",
+        )
+    if not req.symbol or not req.symbol.strip():
+        raise HTTPException(status_code=400, detail="symbol is required")
+
+    pipeline = EventPipeline()
+    return await pipeline.run(req.symbol.upper(), req.time_range)
