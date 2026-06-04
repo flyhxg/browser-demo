@@ -833,7 +833,7 @@ async function closePosition(symbol: string) {
 
 // --- WebSocket (hot tokens) ---
 const hotTokensOff = busOn('hot_tokens_update', (data) => {
-  hotTokens.value = data as HotToken[] | []
+  hotTokens.value = data
 })
 
 onUnmounted(() => {
