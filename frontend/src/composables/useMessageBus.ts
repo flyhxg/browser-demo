@@ -5,6 +5,10 @@
 //
 //     bus.on('hot_tokens_update', (tokens: HotToken[]) => { … })
 //
+// Error policy: emit re-throws the FIRST handler error after invoking
+// all handlers (stack-trace continuity); any subsequent errors are
+// logged to the console so they aren't silently lost.
+//
 // The bus is a module-level singleton. Tests must call `clear()` in
 // `beforeEach` to isolate state. The intentional design trade-off —
 // "the bus is a singleton, not a factory" — keeps the surface small
@@ -42,20 +46,22 @@ export function emit(msg: WsMessage): void {
   // Iterate over a snapshot so a handler that unsubscribes itself
   // does not skip the next handler. We also catch errors so a single
   // throwing handler cannot prevent its siblings from firing; the
-  // first error is re-thrown after all handlers have been invoked.
-  let firstError: unknown
-  let didCatch = false
+  // first error is re-thrown after all handlers have been invoked,
+  // and any subsequent errors are logged so they aren't invisible
+  // to whoever is triaging a misbehaving app.
+  let firstError: unknown = null
   for (const h of [...set]) {
     try {
       h(msg.data)
-    } catch (e) {
-      if (!didCatch) {
-        firstError = e
-        didCatch = true
+    } catch (err) {
+      if (firstError === null) {
+        firstError = err
+      } else {
+        console.error(`[bus] handler for ${msg.type} threw after the first error:`, err)
       }
     }
   }
-  if (didCatch) throw firstError
+  if (firstError !== null) throw firstError
 }
 
 export function clear(): void {

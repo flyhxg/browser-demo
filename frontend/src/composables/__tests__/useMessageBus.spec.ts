@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { on, off, emit, clear, _handlerCount } from '../useMessageBus'
+import type { HotToken } from '../../types'
 
 describe('useMessageBus', () => {
   beforeEach(() => {
@@ -9,7 +10,18 @@ describe('useMessageBus', () => {
   it('emit invokes a registered handler with the data payload', () => {
     const handler = vi.fn()
     on('hot_tokens_update', handler)
-    const tokens = [{ symbol: 'BTCUSDT', price: 50000 }] as unknown as Parameters<typeof handler>[0]
+    const tokens: HotToken[] = [{
+      symbol: 'BTCUSDT',
+      price: 50000,
+      price_change_24h: 0,
+      volume_24h: 0,
+      volume_usd: 0,
+      funding_rate: 0,
+      long_short_ratio: 1,
+      open_interest: 0,
+      liquidation_price: 0,
+      heat_score: 0,
+    }]
     emit({ type: 'hot_tokens_update', data: tokens })
     expect(handler).toHaveBeenCalledTimes(1)
     expect(handler).toHaveBeenCalledWith(tokens)
