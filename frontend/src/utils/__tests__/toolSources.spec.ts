@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   TOOL_DEFAULTS,
-  RESULT_SOURCE_HINTS,
   defaultSourceFor,
   hintForResultSource,
 } from '../toolSources'
