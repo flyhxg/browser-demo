@@ -34,6 +34,9 @@ class SignalScanScheduler:
         if not posts:
             return
         self.scraper.save_to_db(posts)
+        if self._ws_broadcast:
+            for post in posts:
+                await self._ws_broadcast("signal:new", post)
 
     def _is_enabled(self) -> bool:
         return bool(self._config_provider().get("signal_scan_enabled", False))

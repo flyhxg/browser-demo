@@ -51,3 +51,30 @@ async def test_tick_calls_scraper_and_save():
 
     assert scraper.scrape_calls == 1
     assert scraper.save_calls == [[{"source": "x", "content": "$BTC"}]]
+
+
+@pytest.mark.asyncio
+async def test_tick_broadcasts_when_ws_provided():
+    """_tick must call ws_broadcast('signal:new', post) for each post."""
+    from services.scheduler import SignalScanScheduler
+
+    posts = [{"content": "a"}, {"content": "b"}]
+    scraper = FakeScraper(posts=posts)
+    recorded, broadcast = make_ws()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(), ws_broadcast=broadcast)
+
+    await scheduler._tick()
+
+    assert recorded == [("signal:new", {"content": "a"}), ("signal:new", {"content": "b"})]
+
+
+@pytest.mark.asyncio
+async def test_tick_no_broadcast_when_ws_is_none():
+    """_tick must not crash when ws_broadcast is None (default)."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper(posts=[{"content": "a"}])
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config())
+
+    await scheduler._tick()  # no exception
+    assert scraper.save_calls == [[{"content": "a"}]]
