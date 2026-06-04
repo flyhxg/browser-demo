@@ -28,6 +28,13 @@ class SignalScanScheduler:
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
+    async def _tick(self) -> None:
+        """One scrape cycle. Always called from `_loop`."""
+        posts = await self.scraper.scrape()
+        if not posts:
+            return
+        self.scraper.save_to_db(posts)
+
     def _is_enabled(self) -> bool:
         return bool(self._config_provider().get("signal_scan_enabled", False))
 
