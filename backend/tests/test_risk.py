@@ -34,6 +34,12 @@ def test_from_config_store_with_missing_keys_uses_safe_defaults():
     assert cfg.max_position_pct == 0.02  # fallback default
 
 
+def test_from_config_store_uses_position_pct_and_max_open_positions():
+    cfg = RiskConfig.from_config_store(config={"position_pct": 0.05, "max_open_positions": 7})
+    assert cfg.max_position_pct == 0.05
+    assert cfg.max_open_positions == 7
+
+
 def test_polymarket_returns_known_constants():
     cfg = RiskConfig.polymarket()
     assert cfg.tp_pct == 0.05
