@@ -13,7 +13,6 @@ DEFAULT_CONFIG = {
     "proxy_url": "",
     "binance_api_key": "",
     "binance_secret_key": "",
-    "binance_testnet": True,
     "binance_mode": "futures",
     "trading_enabled": False,
     "max_position_size_usd": 100.0,
@@ -28,6 +27,7 @@ DEFAULT_CONFIG = {
     "hot_tokens_max_results": 50,
     "hot_tokens_auto_execute": False,
     "hot_tokens_auto_threshold": 0.8,
+    "chat_use_llm_analysis": False,
 }
 
 
@@ -43,6 +43,28 @@ def _save_config(config: dict) -> None:
 
 def get_config() -> dict:
     return _load_config()
+
+
+def get_trading_config_from_db() -> dict:
+    """Read the trading_config row (id=1) from the SQLite DB.
+
+    This is the source of truth for runtime-tunable settings like
+    `signal_scan_enabled` and `signal_scan_interval_minutes` — values
+    that the operator flips via `PUT /api/trading/config`. Returns an
+    empty dict if the row is missing.
+
+    Use this (not `get_config()`) when you need settings the API
+    endpoint can actually mutate.
+    """
+    from services.database import get_db
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM trading_config WHERE id = 1")
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {}
+    return dict(row)
 
 
 def mask_key(key: str) -> str:
@@ -62,7 +84,6 @@ def get_masked_config() -> dict:
         "browser_mode": config.get("browser_mode", "local"),
         "browser_use_api_key_masked": mask_key(config.get("browser_use_api_key", "")),
         "binance_api_key_masked": mask_key(config.get("binance_api_key", "")),
-        "binance_testnet": config.get("binance_testnet", True),
         "binance_mode": config.get("binance_mode", "futures"),
         "trading_enabled": config.get("trading_enabled", False),
         "max_position_size_usd": config.get("max_position_size_usd", 100.0),
@@ -102,7 +123,6 @@ def get_trading_config() -> dict:
     return {
         "binance_api_key": config.get("binance_api_key", ""),
         "binance_secret_key": config.get("binance_secret_key", ""),
-        "binance_testnet": config.get("binance_testnet", True),
         "binance_mode": config.get("binance_mode", "futures"),
         "trading_enabled": config.get("trading_enabled", False),
         "max_position_size_usd": config.get("max_position_size_usd", 100.0),

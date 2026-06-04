@@ -2,6 +2,9 @@
 import asyncio
 import pytest
 
+from services.database import init_db
+from services.config_store import get_trading_config_from_db
+
 
 class FakeScraper:
     """Records scrape + save calls; configurable results."""
@@ -262,3 +265,34 @@ async def test_loop_picks_up_enabled_toggle():
     await scheduler.stop()
 
     assert scraper.scrape_calls >= 1
+
+
+def test_default_config_provider_reads_from_trading_config_table():
+    """Default config_provider (no override) must read from the trading_config
+    SQLite table — the source of truth for `PUT /api/trading/config` writes.
+
+    Regression test: the kill switch must be togglable via the API endpoint.
+    """
+    from services.scheduler import SignalScanScheduler
+    from services.database import get_db
+
+    init_db()
+    # Seed: row exists but kill switch is off
+    conn = get_db()
+    conn.execute("UPDATE trading_config SET signal_scan_enabled = 0, signal_scan_interval_minutes = 7 WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    scheduler = SignalScanScheduler(scraper=FakeScraper())
+    assert scheduler._is_enabled() is False
+    assert scheduler._interval_seconds() == 7 * 60.0
+
+    # Flip via direct DB write (simulating what PUT /api/trading/config does)
+    conn = get_db()
+    conn.execute("UPDATE trading_config SET signal_scan_enabled = 1, signal_scan_interval_minutes = 2 WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    # Re-reading must pick up the new values
+    assert scheduler._is_enabled() is True
+    assert scheduler._interval_seconds() == 2 * 60.0

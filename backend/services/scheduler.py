@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
-from services.config_store import get_config
+from services.config_store import get_trading_config_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class SignalScanScheduler:
         ws_broadcast: Callable[[str, dict], Awaitable[None]] | None = None,
     ):
         self.scraper = scraper
-        self._config_provider = config_provider or get_config
+        self._config_provider = config_provider or get_trading_config_from_db
         self._ws_broadcast = ws_broadcast
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
