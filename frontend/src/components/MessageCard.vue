@@ -6,8 +6,17 @@
     </div>
     <div class="message-content">
       <div class="message-bubble" :class="msg.role">
-        <ThinkingBlock v-if="msg.thinkingSteps?.length && !msg.text" :steps="msg.thinkingSteps" />
-        <ToolCallBlock v-for="(tc, idx) in msg.toolCalls" :key="idx" :toolCall="tc" />
+        <ThinkingBlock
+          v-if="msg.thinkingSteps?.length"
+          :steps="msg.thinkingSteps"
+          :is-complete="!!msg.text"
+        />
+        <ToolCallBlock
+          v-for="(tc, idx) in msg.toolCalls"
+          :key="idx"
+          :toolCall="tc"
+          :is-complete="tc.status !== 'pending'"
+        />
         <p class="message-text">{{ msg.text }}</p>
       </div>
       <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
@@ -63,7 +72,8 @@ function formatTime(date: Date): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 100%;
+  max-width: calc(100% - 44px);
+  min-width: 0;
 }
 .message-bubble {
   padding: 14px 18px;
@@ -71,6 +81,9 @@ function formatTime(date: Date): string {
   font-size: 15px;
   line-height: 1.6;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
 }
 .message-bubble.user {
   background: #6366f1;
@@ -86,4 +99,15 @@ function formatTime(date: Date): string {
 .message-text { margin: 0; white-space: pre-wrap; font-size: 15px; }
 .message-time { font-size: 11px; color: #52525b; margin-top: 2px; }
 .message-row.user .message-time { text-align: right; }
+
+@media (max-width: 768px) {
+  .message-row { padding: 0 12px; margin: 0 0 16px; gap: 8px; }
+  .message-bubble { padding: 10px 14px; font-size: 14px; max-width: calc(100vw - 80px); }
+  .avatar { width: 28px; height: 28px; font-size: 11px; }
+}
+
+@media (max-width: 480px) {
+  .message-row { padding: 0 8px; }
+  .message-bubble { max-width: calc(100vw - 60px); }
+}
 </style>
