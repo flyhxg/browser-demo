@@ -202,7 +202,7 @@ def test_execute_trade_without_api_keys_returns_error(client):
 # --- signal scan config (Phase 2.4) ---
 
 
-def test_update_config_persists_signal_scan_enabled(client):
+def test_update_config_persists_signal_scan_enabled(client, db_init):
     """PUT /api/trading/config must persist signal_scan_enabled to the DB."""
     # Set a known value
     r = client.put("/api/trading/config", json={"signal_scan_enabled": True})
@@ -215,7 +215,7 @@ def test_update_config_persists_signal_scan_enabled(client):
     assert r2.json()["config"].get("signal_scan_enabled") in (1, True)
 
 
-def test_update_config_persists_signal_scan_interval(client):
+def test_update_config_persists_signal_scan_interval(client, db_init):
     """PUT /api/trading/config must persist signal_scan_interval_minutes to the DB."""
     r = client.put("/api/trading/config", json={"signal_scan_interval_minutes": 7})
     assert r.status_code == 200

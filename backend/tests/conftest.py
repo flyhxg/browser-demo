@@ -1,10 +1,11 @@
-"""Pytest configuration — initialise the real DB before any test runs."""
+"""Pytest configuration — opt-in fixture for tests that need the real DB."""
 import pytest
 
 from services.database import init_db
 
 
-@pytest.fixture(autouse=True)
-def _init_db():
-    """Ensure migrations run before every test (in-process SQLite file)."""
+@pytest.fixture
+def db_init():
+    """Run DB migrations + seed before a test. Use for tests that read/write
+    the real SQLite DB (most FastAPI endpoint tests)."""
     init_db()
