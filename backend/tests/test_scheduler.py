@@ -78,3 +78,19 @@ async def test_tick_no_broadcast_when_ws_is_none():
 
     await scheduler._tick()  # no exception
     assert scraper.save_calls == [[{"content": "a"}]]
+
+
+@pytest.mark.asyncio
+async def test_tick_noop_on_empty_posts():
+    """_tick must not call save_to_db or broadcast when scraper returns []."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper(posts=[])
+    recorded, broadcast = make_ws()
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(), ws_broadcast=broadcast)
+
+    await scheduler._tick()
+
+    assert scraper.scrape_calls == 1
+    assert scraper.save_calls == []
+    assert recorded == []
