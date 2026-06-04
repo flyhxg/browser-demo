@@ -41,6 +41,9 @@ export function off<T extends WsMessageType>(type: T, handler: (data: WsMessage<
 }
 
 export function emit(msg: WsMessage): void {
+  if (import.meta.env.DEV) {
+    console.debug(`[bus] emit ${msg.type}`, msg.data)
+  }
   const set = handlers.get(msg.type)
   if (!set) return
   // Iterate over a snapshot so a handler that unsubscribes itself
