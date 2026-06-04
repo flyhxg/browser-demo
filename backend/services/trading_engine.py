@@ -3,14 +3,24 @@ from typing import Any
 
 from services.binance_trader import BinanceFuturesTrader, create_binance_trader
 from services.database import get_db
+from services.risk import RiskConfig
 
 
 class TradingEngine:
     """Handles trade execution with risk management."""
 
-    def __init__(self, api_key: str, secret_key: str, use_testnet: bool = True, proxy_url: str = "") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        secret_key: str,
+        use_testnet: bool = False,
+        proxy_url: str = "",
+        *,
+        risk: RiskConfig,
+    ) -> None:
         self.trader = create_binance_trader(api_key, secret_key, "futures", use_testnet, proxy_url)
         self.use_testnet = use_testnet
+        self._risk = risk
 
     async def execute_signal(self, signal: dict[str, Any]) -> dict[str, Any]:
         """Execute a validated trading signal.
