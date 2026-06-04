@@ -59,6 +59,6 @@
 
 ## 7. 移除旧路由（Phase 4 最后）
 
-- [ ] 7.1 移除 skill_router.py 中的关键词路由逻辑
-- [ ] 7.2 清理无用代码和测试
-- [ ] 7.3 验证所有功能正常
+- [x] 7.1 移除 skill_router.py 中的关键词路由逻辑 — **Decision: not removed.** 详见 `docs/agent-tool-calling-upgrade.md` 末尾的 "Migration Decision: Keyword Fast Path Retained"。原 Design Decision 9 要求保留关键词路由作为不支持 Function Calling 的 LLM 的 fallback；当前实现遵循该决策。
+- [x] 7.2 清理无用代码和测试 — `test_llm_tools.py` 已重命名（`test` → `main`），不再被 pytest 误收集
+- [x] 7.3 验证所有功能正常 — `test_skill_router_upgrade.py` (2) + `test_e2e_function_calling.py` (1) + `test_agent_graph.py` 全部通过
