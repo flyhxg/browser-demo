@@ -45,14 +45,10 @@ class PositionMonitor:
         self,
         trader: PolymarketTrader,
         check_interval: int = 30,
-        sl_percentage: float = 0.15,
-        tp_percentage: float = 0.05,
     ) -> None:
         self.trader = trader
         self.data_api = PolymarketDataApiClient()
         self.check_interval = check_interval
-        self.sl_percentage = sl_percentage
-        self.tp_percentage = tp_percentage
         self._running = False
         self._task: Optional[asyncio.Task] = None
 

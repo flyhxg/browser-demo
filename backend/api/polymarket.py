@@ -147,8 +147,6 @@ async def get_polymarket_config() -> dict[str, Any]:
             "min_price": row["min_price"],
             "max_price": row["max_price"],
             "market_expiry_hours": row["market_expiry_hours"],
-            "sl_percentage": row["sl_percentage"],
-            "tp_percentage": row["tp_percentage"],
             "auto_execute_threshold": row["auto_execute_threshold"],
             "enabled": bool(row["enabled"]),
         }
@@ -166,7 +164,7 @@ async def update_polymarket_config(data: dict[str, Any]) -> dict[str, Any]:
     allowed = [
         "api_key", "api_secret", "api_passphrase", "private_key",
         "dry_run", "poll_interval", "cluster_min_users", "cluster_min_value",
-        "min_price", "max_price", "sl_percentage", "tp_percentage", "enabled",
+        "min_price", "max_price", "enabled",
     ]
     for key in allowed:
         if key in data:
@@ -224,14 +222,9 @@ async def start_polymarket_polling() -> dict[str, Any]:
     await _polymarket_poller.start()
 
     # Start position monitor
-    from services.risk import RiskConfig
-
-    _risk = RiskConfig.polymarket()
     _position_monitor = PositionMonitor(
         trader=trader,
         check_interval=30,
-        sl_percentage=_risk.sl_pct,
-        tp_percentage=_risk.tp_pct,
     )
     await _position_monitor.start()
 

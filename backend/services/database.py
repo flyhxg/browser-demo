@@ -296,6 +296,16 @@ def init_db() -> None:
         )
     """)
 
+    # Migration: drop dead polymarket SL/TP columns. These were previously
+    # editable via /api/polymarket/config but have been hardcoded in
+    # RiskConfig.polymarket() (sl_pct=0.15, tp_pct=0.05) since the trading-
+    # engine-risk refactor. Idempotent via PRAGMA table_info check.
+    cursor.execute("PRAGMA table_info(polymarket_config)")
+    poly_cols = {row[1] for row in cursor.fetchall()}
+    for col in ("sl_percentage", "tp_percentage"):
+        if col in poly_cols:
+            cursor.execute(f"ALTER TABLE polymarket_config DROP COLUMN {col}")
+
     conn.commit()
     conn.close()
 
