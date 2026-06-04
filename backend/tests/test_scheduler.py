@@ -123,3 +123,24 @@ async def test_tick_survives_save_exception():
     await scheduler._tick()
 
     assert scraper.save_calls == [[{"content": "x"}]]
+
+
+@pytest.mark.asyncio
+async def test_tick_survives_ws_broadcast_exception_per_post():
+    """A failing broadcast for one post must not stop the next post from broadcasting."""
+    from services.scheduler import SignalScanScheduler
+
+    posts = [{"content": "a"}, {"content": "b"}, {"content": "c"}]
+    scraper = FakeScraper(posts=posts)
+    recorded: list[tuple[str, dict]] = []
+
+    async def flaky_broadcast(event: str, payload: dict) -> None:
+        if payload["content"] == "b":
+            raise RuntimeError("ws hiccup")
+        recorded.append((event, payload))
+
+    scheduler = SignalScanScheduler(scraper, config_provider=make_config(), ws_broadcast=flaky_broadcast)
+
+    await scheduler._tick()
+
+    assert recorded == [("signal:new", {"content": "a"}), ("signal:new", {"content": "c"})]
