@@ -176,11 +176,21 @@ Return JSON only, no prose:
       "is_opportunity": true,            // post+context lines up to a trade
       "action": "long",                  // 'long'|'short'|null
       "confidence": 0.82,                // 0-1
-      "reasoning": "Post names a specific technical breakout. RSI 32 (oversold), MACD just crossed up. Top-5 market cap = liquid. Not hype."
+      "decision_steps": [                // REQUIRED: explicit, verifiable reasoning
+        "Token SOL mentioned in post with bullish tone",
+        "Market cap $65B = top 5, liquid (favorable)",
+        "RSI 32.4 = oversold (favorable for long entry)",
+        "MACD bullish_cross with positive histogram (favorable momentum)",
+        "Post names a specific technical level, not generic hype (favorable)",
+        "Conclusion: real opportunity, not noise"
+      ],
+      "reasoning": "Top-5 liquid token, oversold RSI, MACD bullish cross, post names specific level — real breakout, not hype."
     }}
   ]
 }}
 """
+
+The `decision_steps` field is the user's primary verification surface. Each step must be a single observable claim that the user can sanity-check against the post + token snapshot (e.g. "RSI 32.4" maps to `token_metrics.rsi_14`, "Post names specific level" maps to the post content). The LLM is told to make each step reference something concrete — no vague assertions like "this looks bullish". The `reasoning` field is the one-line TL;DR; the steps are the auditable trail.
 ```
 
 **Failure modes:**
@@ -284,7 +294,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
     action TEXT,                     -- 'long' | 'short' | null
     confidence REAL,
     is_opportunity INTEGER DEFAULT 0,  -- 0|1
-    reasoning TEXT,
+    reasoning TEXT,                  -- one-line TL;DR
+    decision_steps TEXT,             -- JSON list of strings; the auditable trail
     llm_model TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (post_id) REFERENCES posts(id)
@@ -373,9 +384,16 @@ The user said: "我说的怎么验证" (how do I verify). UI must make the LLM's
 │ SOL · market_cap $65.2B (#5) · RSI(14) 32.4                       │
 │       · MACD bullish_cross (hist +0.12) · 24h vol $3.2B          │
 │                                                                  │
-│ ── LLM reasoning ─────────────────────────────────────────────── │
-│ "Post names a specific technical breakout. RSI 32 (oversold),     │
-│  MACD just crossed up. Top-5 market cap = liquid. Not hype."      │
+│ ── Decision steps ────────────────────────────────────────────── │
+│ 1. Token SOL mentioned in post with bullish tone                 │
+│ 2. Market cap $65B = top 5, liquid (favorable)                    │
+│ 3. RSI 32.4 = oversold (favorable for long entry)                 │
+│ 4. MACD bullish_cross with positive histogram (favorable momentum)│
+│ 5. Post names a specific technical level, not generic hype        │
+│ → Conclusion: real opportunity, not noise                         │
+│                                                                  │
+│ TL;DR: "Top-5 liquid token, oversold RSI, MACD bullish cross,    │
+│         post names specific level — real breakout, not hype."     │
 │                                                                  │
 │ 👤 AuthorKOL · 18 ❤️ · 4 💬 · 2 ↗                                 │
 │                                                                  │
@@ -387,8 +405,9 @@ For a post that mentions multiple tokens (e.g. $SOL and $ETH), the card shows **
 
 Rules:
 - **Action badge is the largest element on the card.** `📈 LONG` (green) / `📉 SHORT` (red) / `⚪ NO OPPORTUNITY` (gray). One badge per token.
-- **Token snapshot block** is rendered above the LLM reasoning — this is the data the LLM saw, so the user can verify "the LLM said long when RSI was 75" or similar reasoning traps.
-- **Reasoning block is a quoted block, visually distinct** from the post content. LLM's reasoning is the user's primary verification surface.
+- **Token snapshot block** is rendered above the decision steps — this is the data the LLM saw, so the user can verify "the LLM said long when RSI was 75" or similar reasoning traps.
+- **Decision steps** are rendered as a numbered list, each step on its own line. This is the **primary** verification surface. Each step must reference a concrete observation (the post text, a token metric value, or a known project fact) — the user should be able to point at any step and say "this is right" or "this is wrong". The conclusion line uses a `→` prefix to distinguish it from observations.
+- **TL;DR** is the one-line `reasoning` from the LLM, smaller font, below the steps.
 - **Confidence as a horizontal bar** (not a number alone).
 - **Execute button is only enabled when at least one opportunity has `is_opportunity=1`.** Click → opens a tiny dropdown to pick which token to execute (if multiple).
 - **👍/👎 buttons always enabled.** Click → POST to `/api/posts/{id}/feedback`. Selected state is sticky.
@@ -409,11 +428,15 @@ Reload every 30s. Read from `/api/posts/stats`.
 
 In `frontend/src/views/TradingView.vue`:
 
-- Replace the `signal-analysis` div with a new `signal-decision` div (per-token opportunity badge + token snapshot + reasoning block).
+- Replace the `signal-analysis` div with a new `signal-decision` div containing three sub-blocks:
+  - `token-snapshot` — the technical/market data the LLM saw
+  - `decision-steps` — numbered `<ol>` rendering `opportunity.decision_steps`, last line prefixed with `→` (the conclusion)
+  - `reasoning-tldr` — the one-line TL;DR
 - Add `feedbackButtons` block below the reasoning (post-level 👍/👎, sticky selection).
 - Wire `sendFeedback(postId, 'good'|'bad')` and `skipPost(postId)` to the new endpoints.
 - Add a `stats` ref fed by `/api/posts/stats`; re-render every 30s.
-- Pass the new fields through the existing `Post` interface in `frontend/src/types/index.ts` (renamed from `Signal`).
+- Pass the new fields (`decision_steps`, `token_metrics`, etc.) through the existing `Post` interface in `frontend/src/types/index.ts` (renamed from `Signal`).
+- The `decision-steps` `<ol>` should have line numbers visible and a slight indent, e.g. `style="padding-left: 1.5em; line-height: 1.6"`. CSS class: `decision-steps` for theming.
 
 ### 7. Tests
 
@@ -421,10 +444,12 @@ In `frontend/src/views/TradingView.vue`:
 - `test_signal_scraper.py`: assert `save_to_db` returns new ids; assert new columns (`shares`, `posted_at`, `trading_pairs`) get populated.
 - `test_signal_analyzer.py`: 
   - mock `get_coin_details` and `get_klines` to return canned market data
-  - mock `llm.ainvoke` to return canned opportunity list
+  - mock `llm.ainvoke` to return canned opportunity list **with `decision_steps` populated**
   - assert the prompt contains both the post content and the token context (RSI, MACD, market_cap)
-  - assert `analyze()` correctly persists one `opportunities` row per (post, token) and one `token_metric_snapshots` row per fetch
+  - assert the prompt instructs the LLM to output `decision_steps` referencing concrete observations
+  - assert `analyze()` correctly persists one `opportunities` row per (post, token), with `decision_steps` JSON-serialized, and one `token_metric_snapshots` row per fetch
   - assert failure modes: missing market data → partial context, LLM error → empty opportunities list, post stays `analyzed_at=NULL`
+  - assert `_parse_response` correctly extracts the nested `opportunities[].decision_steps` array even when wrapped in ```json``` blocks or with thinking text prepended
 - `test_scheduler.py`: assert `_tick` spawns `_analyze_one` tasks for each new post id; assert a failing LLM does not break the next tick; assert `_analyze_one` does not block the tick (fire-and-forget).
 - `test_posts_api.py`: 
   - GET `/api/posts` returns posts with nested `opportunities` and `token_metrics`
@@ -474,6 +499,6 @@ If `binance_cookies` is empty, scraper proceeds without login (public feed). The
 None — resolved in this conversation:
 - Scraper: API interception via `launch_persistent_context` (handles Windows subprocess issue)
 - LLM: per-post auto, with token context (market_cap + RSI + MACD) pre-fetched and fed alongside the post
-- Decision visibility: per-token opportunity badge + token snapshot + reasoning block + 👍/👎
+- Decision visibility: structured `decision_steps` numbered list (primary) + reasoning TL;DR (secondary) + token snapshot (data backing the steps) + 👍/👎
 - Execution: user-driven, no auto
-- Schema: rename `signals` → `posts`, new `opportunities` (1:N) and `token_metric_snapshots` tables; back-compat via SQL view
+- Schema: rename `signals` → `posts`, new `opportunities` (1:N with `decision_steps`) and `token_metric_snapshots` tables; back-compat via SQL view
