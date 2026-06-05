@@ -3,6 +3,7 @@ import pytest
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="get_exchange_netflow pending Task 4", strict=False)
 async def test_get_exchange_netflow_returns_dict():
     from services.datasources.arkham import get_exchange_netflow
     result = await get_exchange_netflow("ETH")

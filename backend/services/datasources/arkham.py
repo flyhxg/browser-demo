@@ -84,8 +84,11 @@ def _safe_note(message: str) -> dict[str, Any]:
     return {"error": message, "data_source": "arkham"}
 
 
-async def _get_json(url: str, params: dict | None = None) -> dict | None:
-    """GET with retry; return None on persistent failure (caller maps to error dict)."""
+async def _get_json(url: str, params: dict | None = None) -> httpx.Response | None:
+    """GET with retry; return Response on success, None on persistent failure.
+
+    Caller is responsible for checking .status_code and calling .json().
+    """
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _do() -> httpx.Response:
         async with httpx.AsyncClient(timeout=10.0) as client:
