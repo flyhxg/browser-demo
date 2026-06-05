@@ -474,3 +474,52 @@ def get_scanner() -> HotTokensScanner:
             proxy_url=config.get("proxy_url", ""),
         )
     return _scanner
+
+
+# ---------------------------------------------------------------------------
+# Pure scoring helpers (Phase 1a)
+# ---------------------------------------------------------------------------
+
+def _long_crowdedness(token: "HotToken") -> float:
+    """0-1 measure of how crowded the LONG side is. Higher = easier to short.
+
+    F1 (from spec §4.2):
+        funding_signal = clip(funding / 0.01, 0, 1)
+        ls_signal      = clip((ls_ratio - 1.0) / 1.0, 0, 1)
+        long_crowdedness = funding_signal * 0.6 + ls_signal * 0.4
+    """
+    funding_signal = max(min(token.funding_rate / 0.01, 1.0), 0.0)
+    ls_signal = max(min((token.long_short_ratio - 1.0) / 1.0, 1.0), 0.0)
+    return funding_signal * 0.6 + ls_signal * 0.4
+
+
+def _extension_score(token: "HotToken") -> float:
+    """0-1 measure of how extended the price is on the upside.
+
+    F2 (from spec §4.2):
+        +10% move → 1.0; negative or zero change → 0.0; clipped to [0, 1].
+    """
+    if token.price_change_24h <= 0:
+        return 0.0
+    return max(min(token.price_change_24h / 10.0, 1.0), 0.0)
+
+
+def _short_opportunity_score(token: "HotToken") -> float:
+    """Composite 0-1 score combining crowd, extension, liquidity, distribution.
+
+    Spec §4.4 — used in modal only, never for sort.
+    """
+    crowd = _long_crowdedness(token)
+    ext = _extension_score(token)
+
+    liq = (
+        min(token.market_cap / 1e9, 1.0) * 0.6
+        + min(token.volume_usd / 100e6, 1.0) * 0.4
+    )
+
+    if token.top10_holders_pct <= 0:
+        dist = 0.5
+    else:
+        dist = max(min((70.0 - token.top10_holders_pct) / 40.0, 1.0), 0.0)
+
+    return crowd * 0.35 + ext * 0.25 + liq * 0.20 + dist * 0.20
