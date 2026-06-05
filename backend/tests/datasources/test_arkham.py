@@ -192,3 +192,66 @@ async def test_get_whale_movements_http_error(monkeypatch):
     result = await arkham.get_whale_movements("ETH")
     assert "error" in result
     assert result.get("data_source") == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_whale_movements_min_value_usd_propagates(monkeypatch):
+    """Custom min_value_usd should reach the usdGte query param."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+        def json(self): return {"transfers": []}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        captured["params"] = params
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    await arkham.get_whale_movements("BTC", min_value_usd=500_000.0)
+    assert captured["params"]["usdGte"] == 500_000.0
+    assert captured["params"]["limit"] == 10
+    assert captured["params"]["timeLast"] == "24h"
+
+
+@pytest.mark.asyncio
+async def test_get_whale_movements_primary_field_names(monkeypatch):
+    """Exercise the primary Arkham field names (camelCase), not the fallback aliases."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {
+                "transfersArray": [
+                    {
+                        "fromAddress": "0xccc",
+                        "toAddress": "0xddd",
+                        "tokenAmount": 10.5,
+                        "usdValue": 750_000.0,
+                        "chain": "polygon",
+                        "blockTimestamp": "2026-06-05T01:00:00Z",
+                    },
+                ],
+            }
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_whale_movements("ETH")
+    assert len(result["whale_movements"]) == 1
+    m = result["whale_movements"][0]
+    assert m["from"] == "0xccc"
+    assert m["to"] == "0xddd"
+    assert m["amount"] == 10.5
+    assert m["amount_usd"] == 750_000.0
+    assert m["blockchain"] == "polygon"
+    assert m["timestamp"] == "2026-06-05T01:00:00Z"

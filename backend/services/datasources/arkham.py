@@ -173,11 +173,14 @@ async def get_whale_movements(token: str, min_value_usd: float = 1_000_000.0) ->
             if resp.status_code == 401:
                 return _safe_note("Invalid API key")
             if resp.status_code == 404:
-                # Empty data, not an error: keep shape distinct from _safe_note.
+                # 404 = no transfers in window (not an error like a missing token)
                 return {"whale_movements": [], "note": "No transfers found"}
             resp.raise_for_status()
             data = resp.json()
-            transfers = data.get("transfers", []) or data.get("transfersArray", [])
+            if "transfers" in data:
+                transfers = data["transfers"]
+            else:
+                transfers = data.get("transfersArray", [])
             return {
                 "whale_movements": [
                     {
