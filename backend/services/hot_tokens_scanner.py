@@ -39,11 +39,34 @@ class HotToken:
     heat_score: float = 0.0
     heat_rank: int = 0
     updated_at: Optional[str] = None
-    # Short-selling analysis metrics
-    crowdedness_score: float = 0.0      # 0-1, higher = more crowded shorts
-    squeeze_risk: float = 0.0           # 0-1, higher = short squeeze probability
+    # Short-selling analysis metrics (long-side direction)
+    long_crowdedness: float = 0.0       # 0-1, higher = more crowded longs
+    long_squeeze_risk: float = 0.0      # 0-1, higher = longs about to be squeezed
+    extension_score: float = 0.0        # 0-1, higher = closer to short-term top
     short_risk_rating: str = "neutral"  # "low" / "medium" / "high" / "extreme"
-    rebound_potential: float = 0.0      # 0-1, estimated rebound strength
+    short_grade: str = "B"              # "S" / "A" / "B" / "C" / "D"
+    short_opportunity_score: float = 0.0  # 0-1, composite for modal display
+    # Hot tick derivations
+    oi_usd: float = 0.0
+    funding_annualized: float = 0.0
+    # Warm (6h) fundamentals — populated by FundamentalsCache in Phase 1b
+    market_cap: float = 0.0
+    top10_holders_pct: float = 0.0
+    gini: float = 0.0
+    fdv_mcap_ratio: float = 0.0
+    sector: str = "其他"
+    # Cold (daily) OHLCV — populated lazily by get_token_analysis in Phase 1b
+    consecutive_up_days: int = 0
+    trend_strength: float = 0.0
+    high_24h: float = 0.0
+    low_24h: float = 0.0
+    atr: float = 0.0
+    rebound_multiple: float = 0.0
+    low_7d: float = 0.0
+    # Trade reference (placeholders until Phase 1b fills them)
+    stop_loss_price: float = 0.0
+    take_profit_price: float = 0.0
+    recommended_leverage: int = 5
 
 
 # ---------------------------------------------------------------------------
