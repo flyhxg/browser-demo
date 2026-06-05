@@ -141,7 +141,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 
-interface TaskStatus {
+export interface TaskStatus {
   id: number
   name: string
   enabled: boolean
@@ -257,7 +257,7 @@ async function runNow(t: TaskStatus) {
       actionErrors.value[t.id] = body.detail || `HTTP ${resp.status}`
     } else {
       // Refresh after a brief moment so the UI reflects the new last_run
-      setTimeout(fetchStatus, 500)
+      scheduleTimeout(fetchStatus, 500)
     }
   } catch (e: any) {
     actionErrors.value[t.id] = e?.message || 'Network error'
@@ -291,11 +291,23 @@ async function saveInterval(t: TaskStatus) {
   } finally {
     intervalSavingIds.value.delete(t.id)
     intervalSavingIds.value = new Set(intervalSavingIds.value)
-    setTimeout(() => { intervalResults.value[t.id] = null }, 2000)
+    scheduleTimeout(() => { intervalResults.value[t.id] = null }, 2000)
   }
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+// Pending one-shot timers (e.g. from runNow's 500ms refresh, saveInterval's
+// 2s status clear). Tracked so onUnmounted can cancel them — otherwise they
+// fire on an unmounted component and call setRef/setValue on detached state.
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
+
+function scheduleTimeout(fn: () => void, ms: number): void {
+  const id = setTimeout(() => {
+    pendingTimers.delete(id)
+    fn()
+  }, ms)
+  pendingTimers.add(id)
+}
 
 onMounted(() => {
   fetchStatus()
@@ -304,6 +316,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  for (const id of pendingTimers) clearTimeout(id)
+  pendingTimers.clear()
 })
 </script>
 
