@@ -6,10 +6,30 @@ can run without launching chromium.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# CSS selectors for Binance Square post cards. Update in one place if DOM shifts.
+# Verified against fixtures captured 2026-06-05.
+SELECTORS = {
+    "post_card": '[class*="FeedBuzzBaseViewRoot"][data-id]',
+    "post_url": 'a[href^="/en/square/post/"]',
+    "author": 'div.nick-username a.nick',
+    "content": 'div.card__description.rich-text',
+    "likes": 'div.thumb-up-button.card-function-item span.current',
+    "comments": 'div.comments-icon.card-function-item span.current',
+    "login_wall_marker": "input[type='password']",
+    "captcha_marker": "verify you are human",  # matched case-insensitive
+}
+
+
+# Match $BTC / #ETH style token mentions inside a post body. 2-10 uppercase
+# letters prevents hex colors (e.g. #FFF) leaking into the token list.
+_TOKEN_PATTERN = re.compile(r"[\$#]([A-Z]{2,10})")
 
 
 # --- Custom exceptions ---
@@ -61,6 +81,61 @@ class BinanceSquareBrowser:
         """
         raise NotImplementedError
 
+    def _parse_html(self, html: str, limit: int) -> list[dict[str, Any]]:
+        """Parse Binance Square HTML into raw post dicts.
+
+        Detection order: captcha → login wall → empty → extract posts.
+        Posts without a $XXX / #XXX token mention are dropped — the downstream
+        pipeline only cares about tokenised signal.
+        """
+        from bs4 import BeautifulSoup  # type: ignore
+
+        _detect_error_page(html)
+
+        soup = BeautifulSoup(html, "html.parser")
+        cards = soup.select(SELECTORS["post_card"])
+        if not cards:
+            return []
+
+        posts: list[dict[str, Any]] = []
+        for card in cards:
+            # URL — prefer the visible title link
+            url_el = card.select_one(SELECTORS["post_url"])
+            source_url = url_el.get("href", "") if url_el else ""
+            if source_url and not source_url.startswith("http"):
+                source_url = "https://www.binance.com" + source_url
+
+            # Author
+            author_el = card.select_one(SELECTORS["author"])
+            author = author_el.get_text(strip=True) if author_el else "unknown"
+
+            # Content
+            content_el = card.select_one(SELECTORS["content"])
+            content = (content_el.get_text("\n", strip=True) if content_el else "")[:1000]
+
+            # Likes / comments
+            likes_el = card.select_one(SELECTORS["likes"])
+            comments_el = card.select_one(SELECTORS["comments"])
+            likes = _parse_int(likes_el.get_text() if likes_el else "")
+            comments = _parse_int(comments_el.get_text() if comments_el else "")
+
+            tokens = _extract_tokens(content)
+            if not tokens:
+                continue  # spec: only posts that mention a token go to the pipeline
+
+            posts.append({
+                "source": "binance_square",
+                "source_url": source_url,
+                "author": author,
+                "content": content,
+                "likes": likes,
+                "comments": comments,
+                "tokens": tokens,
+            })
+            if len(posts) >= limit:
+                break
+        return posts
+
     async def aclose(self) -> None:
         """Cleanly shut down the browser. Idempotent."""
         if self._browser is not None:
@@ -75,6 +150,45 @@ class BinanceSquareBrowser:
             except Exception as e:
                 logger.debug(f"[BinanceSquareBrowser] playwright stop failed: {e}")
             self._playwright = None
+
+
+# --- Pure helpers (no instance state) ---
+
+
+def _detect_error_page(html: str) -> None:
+    """Raise CaptchaError / LoginWallError if the HTML indicates we hit one."""
+    lower = html.lower()
+    if "verify you are human" in lower or "captcha" in lower:
+        raise CaptchaError("Captcha verification page detected")
+    # Login form is the canonical signal of a redirect
+    if "type=\"password\"" in lower or "type='password'" in lower:
+        raise LoginWallError("Login wall detected (password input present)")
+
+
+def _parse_int(text: str) -> int:
+    """Parse '1.2K' / '234' / '1,234' / '1.5M' style counts into an int."""
+    if not text:
+        return 0
+    t = text.strip().replace(",", "")
+    if t.endswith(("K", "k")):
+        try:
+            return int(float(t[:-1]) * 1000)
+        except ValueError:
+            return 0
+    if t.endswith(("M", "m")):
+        try:
+            return int(float(t[:-1]) * 1_000_000)
+        except ValueError:
+            return 0
+    digits = "".join(c for c in t if c.isdigit() or c == "-")
+    try:
+        return int(digits) if digits else 0
+    except ValueError:
+        return 0
+
+
+def _extract_tokens(content: str) -> list[str]:
+    return list(set(_TOKEN_PATTERN.findall(content)))
 
 
 # --- Module-level singleton ---
