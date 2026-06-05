@@ -13,10 +13,6 @@ router = APIRouter(prefix="/api/hot_tokens")
 
 
 def _token_to_dict(token: Any) -> dict[str, Any]:
-    # Use getattr with defaults so newly-added dataclass fields don't crash
-    # endpoints when older scanner builds are still serving cached data.
-    def g(name: str, default: Any = None) -> Any:
-        return getattr(token, name, default)
     return {
         "symbol": token.symbol,
         "price": token.price,
@@ -30,25 +26,32 @@ def _token_to_dict(token: Any) -> dict[str, Any]:
         "heat_score": token.heat_score,
         "heat_rank": token.heat_rank,
         "updated_at": token.updated_at,
-        "crowdedness_score": token.crowdedness_score,
-        "squeeze_risk": token.squeeze_risk,
+        # Short analysis (corrected long-side direction)
+        "long_crowdedness": token.long_crowdedness,
+        "long_squeeze_risk": token.long_squeeze_risk,
+        "extension_score": token.extension_score,
         "short_risk_rating": token.short_risk_rating,
-        "rebound_potential": token.rebound_potential,
-        # Short-selling trade reference (may be missing on older scanner data)
-        "high_24h": g("high_24h", 0.0),
-        "low_24h": g("low_24h", 0.0),
-        "atr": g("atr", 0.0),
-        "oi_usd": g("oi_usd", 0.0),
-        "recommended_leverage": g("recommended_leverage", 5),
-        "stop_loss_price": g("stop_loss_price", 0.0),
-        "take_profit_price": g("take_profit_price", 0.0),
-        "funding_annualized": g("funding_annualized", 0.0),
-        "short_grade": g("short_grade", "C"),
-        # Trend & market context
-        "market_cap": g("market_cap", 0.0),
-        "consecutive_up_days": g("consecutive_up_days", 0),
-        "trend_strength": g("trend_strength", 0.0),
-        "sector": g("sector", "其他"),
+        "short_grade": token.short_grade,
+        "short_opportunity_score": token.short_opportunity_score,
+        # Hot tick derivations
+        "oi_usd": token.oi_usd,
+        "funding_annualized": token.funding_annualized,
+        # Warm / cold fields — populated by FundamentalsCache (Phase 1b)
+        "market_cap": token.market_cap,
+        "top10_holders_pct": token.top10_holders_pct,
+        "gini": token.gini,
+        "fdv_mcap_ratio": token.fdv_mcap_ratio,
+        "sector": token.sector,
+        "consecutive_up_days": token.consecutive_up_days,
+        "trend_strength": token.trend_strength,
+        "high_24h": token.high_24h,
+        "low_24h": token.low_24h,
+        "atr": token.atr,
+        "rebound_multiple": token.rebound_multiple,
+        "low_7d": token.low_7d,
+        "stop_loss_price": token.stop_loss_price,
+        "take_profit_price": token.take_profit_price,
+        "recommended_leverage": token.recommended_leverage,
     }
 
 
@@ -171,65 +174,52 @@ async def get_token_analysis(symbol: str) -> dict[str, Any]:
     if not token:
         raise HTTPException(status_code=404, detail=f"Token {symbol} not found")
 
-    def g(name: str, default: Any = None) -> Any:
-        return getattr(token, name, default)
-
-    return {
-        "symbol": token.symbol,
-        "price": token.price,
-        "price_change_24h": token.price_change_24h,
-        "volume_24h": token.volume_24h,
-        "volume_usd": token.volume_usd,
-        "funding_rate": token.funding_rate,
-        "long_short_ratio": token.long_short_ratio,
-        "open_interest": token.open_interest,
-        "liquidation_price": token.liquidation_price,
-        "heat_score": token.heat_score,
-        # Short analysis
-        "crowdedness_score": token.crowdedness_score,
-        "squeeze_risk": token.squeeze_risk,
-        "short_risk_rating": token.short_risk_rating,
-        "rebound_potential": token.rebound_potential,
-        # Trade reference
-        "high_24h": g("high_24h", 0.0),
-        "low_24h": g("low_24h", 0.0),
-        "atr": g("atr", 0.0),
-        "oi_usd": g("oi_usd", 0.0),
-        "recommended_leverage": g("recommended_leverage", 5),
-        "stop_loss_price": g("stop_loss_price", 0.0),
-        "take_profit_price": g("take_profit_price", 0.0),
-        "funding_annualized": g("funding_annualized", 0.0),
-        "short_grade": g("short_grade", "C"),
-        # Trend & market context
-        "market_cap": g("market_cap", 0.0),
-        "consecutive_up_days": g("consecutive_up_days", 0),
-        "trend_strength": g("trend_strength", 0.0),
-        "sector": g("sector", "其他"),
-        "metrics": {
-            "funding_annualized": g("funding_annualized", 0.0),
-            "oi_usd": g("oi_usd", 0.0),
-        },
-        "signals": {
-            "funding_extreme": abs(token.funding_rate) > 0.01,
-            "overcrowded_short": token.crowdedness_score > 0.7,
-            "squeeze_alert": token.squeeze_risk > 0.6,
-            "high_rebound_potential": token.rebound_potential > 0.7,
-        },
-        "recommendation": _short_recommendation(token),
+    base = _token_to_dict(token)
+    base["metrics"] = {
+        "funding_annualized": token.funding_annualized,
+        "oi_usd": token.oi_usd,
     }
+    base["signals"] = {
+        "funding_extreme": abs(token.funding_rate) > 0.01,
+        "longs_crowded": token.long_crowdedness > 0.7,
+        "squeeze_alert": token.long_squeeze_risk > 0.6,
+        "high_short_opportunity": token.short_opportunity_score > 0.7,
+    }
+    base["recommendation"] = _short_recommendation(token)
+    return base
 
 
 def _short_recommendation(token: Any) -> str:
-    """Generate short-selling recommendation based on metrics."""
+    """Short recommendation in the corrected long-crowd direction.
+
+    High long_crowdedness = longs are paying funding and over-positioned
+    = favorable short entry. High extension_score = price extended
+    = stronger short setup.
+    """
+    if token.short_risk_rating == "extreme" and token.long_squeeze_risk > 0.7:
+        return (
+            "HIGH CONFIDENCE SHORT — Longs are extremely crowded and "
+            "squeeze risk is high. Wait for funding to flip or a wick, "
+            "then short into the move."
+        )
     if token.short_risk_rating == "extreme":
-        if token.squeeze_risk > 0.7:
-            return "AVOID SHORT - Extreme squeeze risk. Shorts are overcrowded, funding is punitive."
-        return "HIGH RISK - Very crowded short. Consider waiting for better entry."
-    elif token.short_risk_rating == "high":
-        return "MODERATE RISK - Short interest elevated. Watch for squeeze signals."
-    elif token.short_risk_rating == "medium":
-        return "CAUTION - Some short crowding. Monitor funding rate changes."
-    return "LOW RISK - Conditions favorable for short analysis."
+        return (
+            "STRONG SHORT — Extreme long crowding with elevated funding. "
+            "Size conservatively; the position can run further before mean-reverting."
+        )
+    if token.short_risk_rating == "high":
+        return (
+            "MODERATE SHORT — Longs are crowded and funding is positive. "
+            "Standard short setup; honor stop."
+        )
+    if token.short_risk_rating == "medium":
+        return (
+            "CAUTION — Some long crowding but not extreme. "
+            "Wait for extension_score > 0.4 before entry."
+        )
+    return (
+        "LOW CONVICTION — Longs are not crowded. Look elsewhere."
+    )
 
 
 @router.post("/{symbol}/execute")
