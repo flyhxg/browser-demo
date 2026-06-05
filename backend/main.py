@@ -19,7 +19,13 @@ from api.polymarket import router as polymarket_router
 
 from services.database import init_db
 from services.config_store import get_config
-from services.scheduler import SignalScanScheduler, set_scheduler_instance
+from services.scheduler import (
+    PolymarketScheduler,
+    SignalScanScheduler,
+    register,
+    set_scheduler_instance,
+)
+from api.polymarket import _handle_cluster_signal
 from services.sector_classifier import configure_proxy, get_classifier
 from services.signal_scraper import BinanceSquareScraper
 from services.ws_manager import manager
@@ -46,6 +52,9 @@ async def _ws_relay(event: str, payload: dict) -> None:
 _scheduler = SignalScanScheduler(_scraper, ws_broadcast=_ws_relay)
 set_scheduler_instance(_scheduler)
 
+_poly = PolymarketScheduler(signal_handler=_handle_cluster_signal)
+register(_poly)
+
 
 async def _warm_sector_classifier() -> None:
     try:
@@ -58,8 +67,10 @@ async def _warm_sector_classifier() -> None:
 async def lifespan(app: FastAPI):
     asyncio.create_task(_warm_sector_classifier())
     await _scheduler.start()
+    await _poly.start()
     yield
     await _scheduler.stop()
+    await _poly.stop()
 
 
 app = FastAPI(title="Browser Use Web Demo", lifespan=lifespan)
