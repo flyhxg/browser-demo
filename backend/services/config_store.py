@@ -45,6 +45,42 @@ def get_config() -> dict:
     return _load_config()
 
 
+def set_signal_scan_enabled(enabled: bool) -> None:
+    """Persist the signal-scan kill switch in the trading_config table.
+
+    The scheduler re-reads `signal_scan_enabled` from this row on every tick,
+    so flipping the flag takes effect on the next tick boundary without
+    restart. Callers should also call `scheduler.start()` if they want the
+    new value to take effect immediately.
+    """
+    from services.database import get_db
+    conn = get_db()
+    conn.execute(
+        "UPDATE trading_config SET signal_scan_enabled = ? WHERE id = 1",
+        (1 if enabled else 0,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_signal_scan_interval(minutes: int) -> None:
+    """Persist the scan interval (minutes) in the trading_config table.
+
+    The scheduler re-reads this on every tick, so a change applies on the
+    next tick. Must be a positive integer; raises ValueError otherwise.
+    """
+    if not isinstance(minutes, int) or minutes < 1:
+        raise ValueError(f"interval_minutes must be a positive int, got {minutes!r}")
+    from services.database import get_db
+    conn = get_db()
+    conn.execute(
+        "UPDATE trading_config SET signal_scan_interval_minutes = ? WHERE id = 1",
+        (minutes,),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_trading_config_from_db() -> dict:
     """Read the trading_config row (id=1) from the SQLite DB.
 

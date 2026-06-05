@@ -19,9 +19,10 @@ from api.polymarket import router as polymarket_router
 
 from services.database import init_db
 from services.config_store import get_config
-from services.scheduler import SignalScanScheduler
+from services.scheduler import SignalScanScheduler, set_scheduler_instance
 from services.sector_classifier import configure_proxy, get_classifier
 from services.signal_scraper import BinanceSquareScraper
+from services.ws_manager import manager
 
 # --- Proxy setup from config ---
 _config = get_config()
@@ -35,7 +36,15 @@ if _proxy_url:
 configure_proxy(_proxy_url)
 
 _scraper = BinanceSquareScraper()
-_scheduler = SignalScanScheduler(_scraper)
+
+
+async def _ws_relay(event: str, payload: dict) -> None:
+    """Adapter: scheduler calls (event, payload), ws_manager.broadcast expects {type, data}."""
+    await manager.broadcast({"type": event, "data": payload})
+
+
+_scheduler = SignalScanScheduler(_scraper, ws_broadcast=_ws_relay)
+set_scheduler_instance(_scheduler)
 
 
 async def _warm_sector_classifier() -> None:

@@ -1,462 +1,369 @@
 <template>
-  <div class="workflow-page">
+  <div class="workflow-view">
     <!-- Header -->
     <div class="wf-header">
       <h1>Workflow</h1>
-      <p class="wf-subtitle">Visual automation builder for trading strategies</p>
+      <p class="wf-subtitle">Scheduled task control for the signal scanner</p>
     </div>
 
-    <!-- Workflow Canvas -->
-    <div class="workflow-canvas">
-      <!-- Workflow Nodes -->
-      <div class="workflow-nodes">
-        <!-- Trigger Node -->
-        <div class="wf-node trigger">
-          <div class="node-icon">⚡</div>
-          <div class="node-content">
-            <div class="node-title">Signal Trigger</div>
-            <div class="node-desc">When new signal detected</div>
-          </div>
-          <div class="node-status active"></div>
-        </div>
-
-        <!-- Arrow -->
-        <div class="node-arrow">▼</div>
-
-        <!-- Analysis Node -->
-        <div class="wf-node">
-          <div class="node-icon">🧠</div>
-          <div class="node-content">
-            <div class="node-title">LLM Analysis</div>
-            <div class="node-desc">Sentiment & confidence scoring</div>
-          </div>
-          <div class="node-status active"></div>
-        </div>
-
-        <!-- Arrow -->
-        <div class="node-arrow">▼</div>
-
-        <!-- Filter Node -->
-        <div class="wf-node">
-          <div class="node-icon">🔍</div>
-          <div class="node-content">
-            <div class="node-title">Signal Filter</div>
-            <div class="node-desc">Apply trading rules</div>
-          </div>
-          <div class="node-status active"></div>
-        </div>
-
-        <!-- Arrow -->
-        <div class="node-arrow">▼</div>
-
-        <!-- Action Node -->
-        <div class="wf-node action">
-          <div class="node-icon">🚀</div>
-          <div class="node-content">
-            <div class="node-title">Execute Trade</div>
-            <div class="node-desc">Binance Futures order</div>
-          </div>
-          <div class="node-status" :class="tradingEnabled ? 'active' : 'inactive'"></div>
-        </div>
-      </div>
+    <!-- Loading / empty state -->
+    <div v-if="loading && !task" class="loading-card">
+      <div class="loading-spinner"></div>
+      <span>Loading scheduler state…</span>
     </div>
 
-    <!-- Workflow Settings Cards -->
-    <div class="workflow-settings">
-      <h3>Workflow Configuration</h3>
-      <div class="settings-grid">
-        <!-- Scan Settings -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">📡</span>
-            <div>
-              <div class="setting-title">Auto Scan</div>
-              <div class="setting-desc">Monitor Binance Square for signals</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <div class="toggle-group">
-              <button class="toggle-btn" :class="{ active: autoScan }" @click="autoScan = true">On</button>
-              <button class="toggle-btn" :class="{ active: !autoScan }" @click="autoScan = false">Off</button>
-            </div>
-            <div class="input-inline">
-              <span>Every</span>
-              <input v-model="scanInterval" type="number" min="1" max="60" />
-              <span>min</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Auto Execute -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">🤖</span>
-            <div>
-              <div class="setting-title">Auto Execute</div>
-              <div class="setting-desc">Execute trades automatically</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <div class="toggle-group">
-              <button class="toggle-btn" :class="{ active: autoExecute }" @click="autoExecute = true">On</button>
-              <button class="toggle-btn" :class="{ active: !autoExecute }" @click="autoExecute = false">Off</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Confidence Filter -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">🎯</span>
-            <div>
-              <div class="setting-title">Min Confidence</div>
-              <div class="setting-desc">Signal confidence threshold</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <input v-model="minConfidence" type="range" min="0" max="1" step="0.05" class="slider" />
-            <span class="slider-value">{{ (minConfidence * 100).toFixed(0) }}%</span>
-          </div>
-        </div>
-
-        <!-- Position Size -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">💰</span>
-            <div>
-              <div class="setting-title">Max Position</div>
-              <div class="setting-desc">Maximum position size in USD</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <div class="input-group">
-              <span class="currency">$</span>
-              <input v-model="maxPositionSize" type="number" placeholder="100" />
-            </div>
-          </div>
-        </div>
-
-        <!-- TP / SL -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">🛡️</span>
-            <div>
-              <div class="setting-title">Risk Management</div>
-              <div class="setting-desc">Take Profit & Stop Loss %</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <div class="input-inline">
-              <span>TP</span>
-              <input v-model="tpPercentage" type="number" step="0.1" placeholder="5" />
-              <span>%</span>
-            </div>
-            <div class="input-inline">
-              <span>SL</span>
-              <input v-model="slPercentage" type="number" step="0.1" placeholder="3" />
-              <span>%</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Trading Mode -->
-        <div class="setting-card">
-          <div class="setting-header">
-            <span class="setting-icon">⚙️</span>
-            <div>
-              <div class="setting-title">Trading Mode</div>
-              <div class="setting-desc">Futures or Spot</div>
-            </div>
-          </div>
-          <div class="setting-controls">
-            <div class="radio-group">
-              <button class="radio-btn" :class="{ active: binanceMode === 'futures' }" @click="binanceMode = 'futures'">Futures</button>
-              <button class="radio-btn" :class="{ active: binanceMode === 'spot' }" @click="binanceMode = 'spot'">Spot</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="actions-bar">
-        <button class="btn-primary" @click="saveWorkflow">
-          <span>💾 Save Workflow</span>
-        </button>
-        <button class="btn-secondary" @click="runNow">
-          <span>▶ Run Now</span>
-        </button>
-        <span v-if="saveResult === true" class="status ok">Saved</span>
-        <span v-if="saveResult === false" class="status err">Save failed</span>
-      </div>
+    <div v-else-if="error" class="error-card">
+      <div class="error-icon">⚠</div>
+      <div class="error-title">Scheduler not reachable</div>
+      <div class="error-desc">{{ error }}</div>
+      <button class="btn-outline" @click="fetchStatus">Retry</button>
     </div>
+
+    <template v-else-if="task">
+      <!-- Task Card -->
+      <div class="task-card">
+        <div class="task-header">
+          <div class="task-identity">
+            <span class="task-icon" :class="statusClass">⚡</span>
+            <div>
+              <div class="task-name">{{ task.name }}</div>
+              <div class="task-id">Task #{{ task.id }}</div>
+            </div>
+          </div>
+          <div class="task-status-badge" :class="statusClass">
+            <span class="status-dot" :class="statusClass"></span>
+            {{ statusLabel }}
+          </div>
+        </div>
+
+        <div class="task-metrics">
+          <div class="metric">
+            <div class="metric-label">Interval</div>
+            <div class="metric-value">
+              {{ task.interval_minutes }} <span class="metric-unit">min</span>
+            </div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Last run</div>
+            <div class="metric-value" :class="{ 'muted': !task.last_run }">
+              {{ formatTimestamp(task.last_run) }}
+            </div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Next run</div>
+            <div class="metric-value" :class="{ 'muted': !task.next_run }">
+              {{ formatTimestamp(task.next_run) }}
+            </div>
+          </div>
+        </div>
+
+        <div class="task-actions">
+          <button
+            class="btn-primary"
+            :disabled="actionPending"
+            @click="toggleTask"
+          >
+            <span v-if="actionPending">Working…</span>
+            <span v-else-if="task.running">⏸ Pause</span>
+            <span v-else-if="task.enabled">▶ Resume</span>
+            <span v-else>Enable & Start</span>
+          </button>
+
+          <button
+            class="btn-accent"
+            :disabled="actionPending || !task.enabled"
+            :title="!task.enabled ? 'Task is disabled — enable first' : 'Run a single tick immediately'"
+            @click="runNow"
+          >
+            ▶ Run Now
+          </button>
+
+          <div class="interval-control">
+            <label for="interval-input">Interval (min):</label>
+            <input
+              id="interval-input"
+              v-model.number="intervalInput"
+              type="number"
+              min="1"
+              max="60"
+              :disabled="intervalSaving"
+            />
+            <button
+              class="btn-outline"
+              :disabled="intervalSaving || intervalInput === task.interval_minutes"
+              @click="saveInterval"
+            >
+              {{ intervalSaving ? 'Saving…' : 'Save' }}
+            </button>
+            <span v-if="intervalResult === 'ok'" class="status ok">Saved</span>
+            <span v-if="intervalResult === 'err'" class="status err">Save failed</span>
+          </div>
+        </div>
+
+        <div v-if="actionError" class="action-error">{{ actionError }}</div>
+      </div>
+
+      <!-- Help text -->
+      <div class="help-card">
+        <h3>How it works</h3>
+        <ul>
+          <li>
+            <strong>Signal Scanner</strong> runs on the backend every N minutes
+            and scrapes Binance Square for new posts.
+          </li>
+          <li>
+            <strong>Pause</strong> stops the loop without forgetting the interval;
+            the task resumes from the same point when started again.
+          </li>
+          <li>
+            <strong>Run Now</strong> fires a single tick in the background
+            (non-blocking) — useful for testing config changes without waiting.
+          </li>
+          <li>
+            Changing the interval only affects future ticks; the current tick
+            (if any) finishes first.
+          </li>
+        </ul>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-const autoScan = ref(false)
-const autoExecute = ref(false)
-const scanInterval = ref(5)
-const saveResult = ref<boolean | null>(null)
-
-const binanceMode = ref<'futures' | 'spot'>('futures')
-const tradingEnabled = ref(false)
-const maxPositionSize = ref(100)
-const tpPercentage = ref(5.0)
-const slPercentage = ref(3.0)
-const minConfidence = ref(0.7)
-
-async function loadConfig() {
-  try {
-    const resp = await fetch('/api/config')
-    const config = await resp.json()
-    autoScan.value = config?.trading_enabled || false
-    scanInterval.value = config?.scan_interval_minutes || 5
-    binanceMode.value = config?.binance_mode || 'futures'
-    tradingEnabled.value = config?.trading_enabled || false
-    maxPositionSize.value = config?.max_position_size_usd || 100
-    tpPercentage.value = config?.tp_percentage || 5.0
-    slPercentage.value = config?.sl_percentage || 3.0
-    minConfidence.value = config?.min_confidence || 0.7
-  } catch { /* ignore */ }
+interface TaskStatus {
+  id: number
+  name: string
+  enabled: boolean
+  running: boolean
+  status: 'running' | 'paused' | 'idle'
+  interval_minutes: number
+  last_run: number | null
+  next_run: number | null
 }
 
-async function saveWorkflow() {
-  const data = {
-    auto_scan: autoScan.value,
-    auto_execute: autoExecute.value,
-    scan_interval_minutes: scanInterval.value,
-    binance_mode: binanceMode.value,
-    trading_enabled: autoExecute.value,
-    max_position_size_usd: maxPositionSize.value,
-    tp_percentage: tpPercentage.value,
-    sl_percentage: slPercentage.value,
-    min_confidence: minConfidence.value,
-  }
+const POLL_INTERVAL_MS = 2000
+
+const task = ref<TaskStatus | null>(null)
+const loading = ref(true)
+const error = ref<string | null>(null)
+const actionPending = ref(false)
+const actionError = ref<string | null>(null)
+
+const intervalInput = ref<number>(5)
+const intervalSaving = ref(false)
+const intervalResult = ref<'ok' | 'err' | null>(null)
+
+const statusLabel = computed(() => {
+  if (!task.value) return ''
+  if (task.value.running) return 'Running'
+  if (!task.value.enabled) return 'Disabled'
+  return 'Paused'
+})
+
+const statusClass = computed(() => {
+  if (!task.value) return 'inactive'
+  if (task.value.running) return 'active'
+  if (task.value.enabled) return 'idle'
+  return 'inactive'
+})
+
+function formatTimestamp(epochSeconds: number | null): string {
+  if (!epochSeconds) return '—'
+  const d = new Date(epochSeconds * 1000)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+async function fetchStatus() {
   try {
-    const resp = await fetch('/api/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    saveResult.value = resp.ok
-    setTimeout(() => { saveResult.value = null }, 2000)
-  } catch {
-    saveResult.value = false
-    setTimeout(() => { saveResult.value = null }, 2000)
+    const resp = await fetch('/api/workflow/tasks')
+    if (!resp.ok) {
+      error.value = `HTTP ${resp.status}: ${resp.statusText}`
+      task.value = null
+      return
+    }
+    const data = await resp.json()
+    const tasks: TaskStatus[] = data.tasks || []
+    error.value = null
+    if (tasks.length === 0) {
+      task.value = null
+      return
+    }
+    task.value = tasks[0]
+    if (intervalInput.value !== tasks[0].interval_minutes) {
+      intervalInput.value = tasks[0].interval_minutes
+    }
+  } catch (e: any) {
+    error.value = e?.message || 'Network error'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function toggleTask() {
+  if (!task.value) return
+  actionPending.value = true
+  actionError.value = null
+  try {
+    const resp = await fetch(`/api/workflow/tasks/${task.value.id}/toggle`, { method: 'POST' })
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}))
+      actionError.value = body.detail || `HTTP ${resp.status}`
+    } else {
+      await fetchStatus()
+    }
+  } catch (e: any) {
+    actionError.value = e?.message || 'Network error'
+  } finally {
+    actionPending.value = false
   }
 }
 
 async function runNow() {
+  if (!task.value) return
+  actionPending.value = true
+  actionError.value = null
   try {
-    await fetch('/api/workflow/tasks/1/run', { method: 'POST' })
-  } catch { /* ignore */ }
+    const resp = await fetch(`/api/workflow/tasks/${task.value.id}/run`, { method: 'POST' })
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}))
+      actionError.value = body.detail || `HTTP ${resp.status}`
+    } else {
+      // Refresh after a brief moment so the UI reflects the new last_run
+      setTimeout(fetchStatus, 500)
+    }
+  } catch (e: any) {
+    actionError.value = e?.message || 'Network error'
+  } finally {
+    actionPending.value = false
+  }
 }
 
+async function saveInterval() {
+  if (!task.value) return
+  if (intervalInput.value === task.value.interval_minutes) return
+  intervalSaving.value = true
+  intervalResult.value = null
+  try {
+    const resp = await fetch('/api/workflow/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interval_minutes: intervalInput.value }),
+    })
+    if (!resp.ok) {
+      intervalResult.value = 'err'
+    } else {
+      intervalResult.value = 'ok'
+      await fetchStatus()
+    }
+  } catch {
+    intervalResult.value = 'err'
+  } finally {
+    intervalSaving.value = false
+    setTimeout(() => { intervalResult.value = null }, 2000)
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
-  loadConfig()
+  fetchStatus()
+  pollTimer = setInterval(fetchStatus, POLL_INTERVAL_MS)
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
 <style scoped>
-.workflow-page { padding: 32px; max-width: 900px; margin: 0 auto; }
-.wf-header { margin-bottom: 32px; }
-.wf-header h1 { font-size: 24px; font-weight: 700; color: #fff; margin: 0 0 8px; }
+.workflow-view { padding: 32px; max-width: 900px; margin: 0 auto; }
+.wf-header { margin-bottom: 28px; }
+.wf-header h1 { font-size: 24px; font-weight: 700; color: #fff; margin: 0 0 6px; }
 .wf-subtitle { font-size: 14px; color: #71717a; margin: 0; }
 
-/* Workflow Canvas */
-.workflow-canvas {
+/* Task card */
+.task-card {
   background: #111114;
   border: 1px solid #1e1e24;
   border-radius: 16px;
-  padding: 32px;
-  margin-bottom: 32px;
+  padding: 24px 28px;
+  margin-bottom: 24px;
 }
-.workflow-nodes {
+.task-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
-  gap: 0;
+  margin-bottom: 20px;
 }
-
-/* Node */
-.wf-node {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: #0a0a0f;
-  border: 1px solid #27272a;
+.task-identity { display: flex; align-items: center; gap: 14px; }
+.task-icon {
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  padding: 16px 24px;
-  width: 100%;
-  max-width: 400px;
-  position: relative;
-  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  background: #6366f1;
+  color: #fff;
 }
-.wf-node:hover {
-  border-color: #3f3f46;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+.task-icon.idle { background: rgba(99,102,241,0.15); color: #818cf8; }
+.task-icon.inactive { background: #27272a; color: #71717a; }
+.task-name { font-size: 17px; font-weight: 700; color: #fff; }
+.task-id { font-size: 12px; color: #71717a; }
+.task-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
 }
-.wf-node.trigger {
-  border-color: rgba(99, 102, 241, 0.3);
-  background: rgba(99, 102, 241, 0.05);
-}
-.wf-node.action {
-  border-color: rgba(34, 197, 94, 0.3);
-  background: rgba(34, 197, 94, 0.05);
-}
-.node-icon { font-size: 24px; }
-.node-content { flex: 1; }
-.node-title { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 2px; }
-.node-desc { font-size: 13px; color: #71717a; }
-.node-status {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.node-status.active { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.4); }
-.node-status.inactive { background: #52525b; }
+.task-status-badge.active { background: rgba(34,197,94,0.15); color: #22c55e; }
+.task-status-badge.idle { background: rgba(99,102,241,0.15); color: #818cf8; }
+.task-status-badge.inactive { background: #27272a; color: #71717a; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-dot.active { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+.status-dot.idle { background: #818cf8; }
+.status-dot.inactive { background: #52525b; }
 
-/* Arrow */
-.node-arrow {
-  color: #3f3f46;
-  font-size: 12px;
-  padding: 8px 0;
-  user-select: none;
-}
-
-/* Settings */
-.workflow-settings { margin-bottom: 32px; }
-.workflow-settings h3 { font-size: 18px; font-weight: 600; color: #fff; margin: 0 0 20px; }
-.settings-grid {
+/* Metrics */
+.task-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-/* Setting Card */
-.setting-card {
-  background: #111114;
+  gap: 12px;
+  padding: 16px;
+  background: #0a0a0f;
   border: 1px solid #1e1e24;
   border-radius: 12px;
-  padding: 20px;
-  transition: border-color 0.2s;
+  margin-bottom: 20px;
 }
-.setting-card:hover { border-color: #27272a; }
-.setting-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+.metric { text-align: center; }
+.metric-label {
+  font-size: 11px;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
 }
-.setting-icon { font-size: 24px; }
-.setting-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 2px; }
-.setting-desc { font-size: 12px; color: #71717a; }
-
-/* Controls */
-.setting-controls { display: flex; flex-direction: column; gap: 12px; }
-.toggle-group { display: flex; gap: 6px; }
-.toggle-btn {
-  padding: 6px 16px;
-  border: 1px solid #27272a;
-  border-radius: 8px;
-  background: transparent;
-  color: #a1a1aa;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
+.metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
 }
-.toggle-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
-.toggle-btn:hover:not(.active) { background: #1a1a1f; }
-
-.input-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #a1a1aa;
-}
-.input-inline input {
-  width: 60px;
-  padding: 6px 10px;
-  border: 1px solid #27272a;
-  border-radius: 6px;
-  background: #0a0a0f;
-  color: #e4e4e7;
-  font-size: 13px;
-  text-align: center;
-  outline: none;
-}
-.input-inline input:focus { border-color: #6366f1; }
-
-.slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: #27272a;
-  outline: none;
-  cursor: pointer;
-}
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #6366f1;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-.slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
-.slider-value { font-size: 13px; font-weight: 600; color: #6366f1; text-align: center; }
-
-.input-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.input-group input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #27272a;
-  border-radius: 8px;
-  background: #0a0a0f;
-  color: #e4e4e7;
-  font-size: 14px;
-  outline: none;
-}
-.input-group input:focus { border-color: #6366f1; }
-.currency { font-size: 14px; color: #71717a; }
-
-.radio-group { display: flex; gap: 6px; }
-.radio-btn {
-  padding: 6px 16px;
-  border: 1px solid #27272a;
-  border-radius: 8px;
-  background: transparent;
-  color: #a1a1aa;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.radio-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
-.radio-btn:hover:not(.active) { background: #1a1a1f; }
+.metric-value.muted { color: #52525b; font-weight: 500; }
+.metric-unit { font-size: 13px; color: #71717a; font-weight: 500; }
 
 /* Actions */
-.actions-bar {
+.task-actions {
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid #1e1e24;
+  flex-wrap: wrap;
 }
 .btn-primary {
   padding: 10px 24px;
@@ -469,25 +376,137 @@ onMounted(() => {
   cursor: pointer;
   transition: background 0.2s;
 }
-.btn-primary:hover { background: #5558e6; }
-.btn-secondary {
-  padding: 10px 24px;
-  border: 1px solid #27272a;
+.btn-primary:hover:not(:disabled) { background: #5558e6; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-accent {
+  padding: 10px 20px;
+  border: none;
   border-radius: 10px;
-  background: transparent;
-  color: #e4e4e7;
+  background: #22c55e;
+  color: #0a0a0f;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-accent:hover:not(:disabled) { background: #16a34a; }
+.btn-accent:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-outline {
+  padding: 8px 16px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
-.btn-secondary:hover { background: #1a1a1f; }
-.status { font-size: 13px; font-weight: 500; }
+.btn-outline:hover:not(:disabled) { border-color: #6366f1; color: #6366f1; }
+.btn-outline:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Interval control */
+.interval-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 13px;
+  color: #a1a1aa;
+}
+.interval-control input {
+  width: 70px;
+  padding: 8px 10px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #0a0a0f;
+  color: #e4e4e7;
+  font-size: 14px;
+  text-align: center;
+  outline: none;
+}
+.interval-control input:focus { border-color: #6366f1; }
+.interval-control input:disabled { opacity: 0.5; }
+.status { font-size: 12px; font-weight: 600; margin-left: 4px; }
 .status.ok { color: #22c55e; }
 .status.err { color: #ef4444; }
 
-@media (max-width: 768px) {
-  .settings-grid { grid-template-columns: 1fr; }
-  .workflow-page { padding: 16px; }
+.action-error {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  color: #ef4444;
+  font-size: 13px;
+}
+
+/* Loading / error states */
+.loading-card, .error-card {
+  background: #111114;
+  border: 1px solid #1e1e24;
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+}
+.loading-card { display: flex; align-items: center; justify-content: center; gap: 12px; color: #71717a; }
+.loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #27272a;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-icon { font-size: 32px; margin-bottom: 8px; }
+.error-title { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+.error-desc { font-size: 13px; color: #71717a; margin-bottom: 16px; }
+
+/* Help card */
+.help-card {
+  background: #0a0a0f;
+  border: 1px solid #1e1e24;
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.help-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #a1a1aa;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.help-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.help-card li {
+  font-size: 13px;
+  color: #a1a1aa;
+  line-height: 1.5;
+  padding-left: 16px;
+  position: relative;
+}
+.help-card li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: #6366f1;
+  font-weight: 700;
+  font-size: 20px;
+  line-height: 1;
+}
+.help-card strong { color: #e4e4e7; }
+
+@media (max-width: 640px) {
+  .task-metrics { grid-template-columns: 1fr; }
+  .task-actions { flex-direction: column; align-items: stretch; }
+  .interval-control { margin-left: 0; }
 }
 </style>

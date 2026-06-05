@@ -13,6 +13,10 @@ router = APIRouter(prefix="/api/hot_tokens")
 
 
 def _token_to_dict(token: Any) -> dict[str, Any]:
+    # Use getattr with defaults so newly-added dataclass fields don't crash
+    # endpoints when older scanner builds are still serving cached data.
+    def g(name: str, default: Any = None) -> Any:
+        return getattr(token, name, default)
     return {
         "symbol": token.symbol,
         "price": token.price,
@@ -30,21 +34,21 @@ def _token_to_dict(token: Any) -> dict[str, Any]:
         "squeeze_risk": token.squeeze_risk,
         "short_risk_rating": token.short_risk_rating,
         "rebound_potential": token.rebound_potential,
-        # Short-selling trade reference
-        "high_24h": token.high_24h,
-        "low_24h": token.low_24h,
-        "atr": token.atr,
-        "oi_usd": token.oi_usd,
-        "recommended_leverage": token.recommended_leverage,
-        "stop_loss_price": token.stop_loss_price,
-        "take_profit_price": token.take_profit_price,
-        "funding_annualized": token.funding_annualized,
-        "short_grade": token.short_grade,
+        # Short-selling trade reference (may be missing on older scanner data)
+        "high_24h": g("high_24h", 0.0),
+        "low_24h": g("low_24h", 0.0),
+        "atr": g("atr", 0.0),
+        "oi_usd": g("oi_usd", 0.0),
+        "recommended_leverage": g("recommended_leverage", 5),
+        "stop_loss_price": g("stop_loss_price", 0.0),
+        "take_profit_price": g("take_profit_price", 0.0),
+        "funding_annualized": g("funding_annualized", 0.0),
+        "short_grade": g("short_grade", "C"),
         # Trend & market context
-        "market_cap": token.market_cap,
-        "consecutive_up_days": token.consecutive_up_days,
-        "trend_strength": token.trend_strength,
-        "sector": token.sector,
+        "market_cap": g("market_cap", 0.0),
+        "consecutive_up_days": g("consecutive_up_days", 0),
+        "trend_strength": g("trend_strength", 0.0),
+        "sector": g("sector", "其他"),
     }
 
 
@@ -64,6 +68,23 @@ async def scanner_status() -> dict[str, Any]:
         "running": scanner._running,
         "tokens_count": len(scanner._hot_tokens),
     }
+
+
+@router.get("/sectors")
+async def get_sectors() -> dict[str, Any]:
+    """Get all known sector mappings for currently-tracked hot tokens.
+
+    Returns a flat dict of `{SYMBOL: sector_name}` for tokens with a
+    non-default sector. Tokens with sector="其他" (the scanner fallback)
+    are excluded so the response stays focused on classified tokens.
+    """
+    scanner = get_scanner()
+    sectors: dict[str, str] = {}
+    for symbol, token in scanner._hot_tokens.items():
+        sector = getattr(token, "sector", "其他") or "其他"
+        if sector and sector != "其他":
+            sectors[symbol] = sector
+    return {"sectors": sectors, "count": len(sectors)}
 
 
 @router.post("/start")
@@ -150,6 +171,9 @@ async def get_token_analysis(symbol: str) -> dict[str, Any]:
     if not token:
         raise HTTPException(status_code=404, detail=f"Token {symbol} not found")
 
+    def g(name: str, default: Any = None) -> Any:
+        return getattr(token, name, default)
+
     return {
         "symbol": token.symbol,
         "price": token.price,
@@ -167,23 +191,23 @@ async def get_token_analysis(symbol: str) -> dict[str, Any]:
         "short_risk_rating": token.short_risk_rating,
         "rebound_potential": token.rebound_potential,
         # Trade reference
-        "high_24h": token.high_24h,
-        "low_24h": token.low_24h,
-        "atr": token.atr,
-        "oi_usd": token.oi_usd,
-        "recommended_leverage": token.recommended_leverage,
-        "stop_loss_price": token.stop_loss_price,
-        "take_profit_price": token.take_profit_price,
-        "funding_annualized": token.funding_annualized,
-        "short_grade": token.short_grade,
+        "high_24h": g("high_24h", 0.0),
+        "low_24h": g("low_24h", 0.0),
+        "atr": g("atr", 0.0),
+        "oi_usd": g("oi_usd", 0.0),
+        "recommended_leverage": g("recommended_leverage", 5),
+        "stop_loss_price": g("stop_loss_price", 0.0),
+        "take_profit_price": g("take_profit_price", 0.0),
+        "funding_annualized": g("funding_annualized", 0.0),
+        "short_grade": g("short_grade", "C"),
         # Trend & market context
-        "market_cap": token.market_cap,
-        "consecutive_up_days": token.consecutive_up_days,
-        "trend_strength": token.trend_strength,
-        "sector": token.sector,
+        "market_cap": g("market_cap", 0.0),
+        "consecutive_up_days": g("consecutive_up_days", 0),
+        "trend_strength": g("trend_strength", 0.0),
+        "sector": g("sector", "其他"),
         "metrics": {
-            "funding_annualized": token.funding_annualized,
-            "oi_usd": token.oi_usd,
+            "funding_annualized": g("funding_annualized", 0.0),
+            "oi_usd": g("oi_usd", 0.0),
         },
         "signals": {
             "funding_extreme": abs(token.funding_rate) > 0.01,
@@ -219,12 +243,11 @@ async def execute_trade(symbol: str) -> dict[str, Any]:
     config = get_config()
     api_key = config.get("binance_api_key", "")
     api_secret = config.get("binance_secret_key", "")
-    use_testnet = config.get("binance_testnet", True)
 
     from services.risk import RiskConfig
 
     risk = RiskConfig.from_config_store()
-    engine = TradingEngine(api_key, api_secret, use_testnet, risk=risk)
+    engine = TradingEngine(api_key, api_secret, risk=risk)
 
     signal_dict = {
         "token": token.symbol.replace("USDT", ""),

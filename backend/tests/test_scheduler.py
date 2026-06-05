@@ -1,5 +1,7 @@
 """Tests for SignalScanScheduler (Phase 2.4 of ai-trading-system)."""
 import asyncio
+import time
+
 import pytest
 
 from services.database import init_db
@@ -296,3 +298,147 @@ def test_default_config_provider_reads_from_trading_config_table():
     # Re-reading must pick up the new values
     assert scheduler._is_enabled() is True
     assert scheduler._interval_seconds() == 2 * 60.0
+
+
+# --- get_status / run_now tests (workflow API surface) ---
+
+
+@pytest.mark.asyncio
+async def test_status_reports_running_when_started():
+    """get_status must report running=True after start() with enabled config."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=True, interval_minutes=0.001),
+    )
+
+    status_before = scheduler.get_status()
+    assert status_before["enabled"] is True
+    assert status_before["running"] is False
+    assert status_before["status"] == "idle"
+
+    await scheduler.start()
+    try:
+        status = scheduler.get_status()
+        assert status["id"] == 1
+        assert status["name"] == "Signal Scanner"
+        assert status["enabled"] is True
+        assert status["running"] is True
+        assert status["status"] == "running"
+        assert status["interval_minutes"] == 0  # 0.001 floored
+        assert status["next_run"] is not None
+        assert status["next_run"] > 0
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_status_reports_idle_when_disabled():
+    """get_status must report enabled=False, running=False, status='paused' when config kill switch is off."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=False, interval_minutes=10),
+    )
+
+    await scheduler.start()  # should be a no-op when disabled
+
+    status = scheduler.get_status()
+    assert status["enabled"] is False
+    assert status["running"] is False
+    assert status["status"] == "paused"
+    assert status["interval_minutes"] == 10
+    assert status["next_run"] is None
+
+
+@pytest.mark.asyncio
+async def test_status_records_last_run_after_tick():
+    """get_status.last_run must be set after _tick completes (even with empty posts)."""
+    from services.scheduler import SignalScanScheduler
+    import time
+
+    scraper = FakeScraper(posts=[])  # empty posts still updates last_run
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=True, interval_minutes=1),
+    )
+
+    before = time.time()
+    await scheduler._tick()
+    after = time.time()
+
+    status = scheduler.get_status()
+    assert status["last_run"] is not None
+    assert before <= status["last_run"] <= after
+
+
+@pytest.mark.asyncio
+async def test_run_now_does_not_block():
+    """run_now() must return immediately; the tick runs as a background asyncio task."""
+    from services.scheduler import SignalScanScheduler
+    import asyncio
+
+    class SlowScraper(FakeScraper):
+        async def scrape(self):
+            await asyncio.sleep(0.1)
+            return [{"content": "slow"}]
+
+    scraper = SlowScraper()
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=True, interval_minutes=1),
+    )
+
+    t0 = time.monotonic()
+    scheduler.run_now()
+    elapsed = time.monotonic() - t0
+
+    # Should return in < 50ms (vs the 100ms scrape); allow slack for event-loop scheduling
+    assert elapsed < 0.05, f"run_now took {elapsed:.3f}s, expected near-instant"
+
+    # Give the background tick time to finish, then last_run should be set
+    await asyncio.sleep(0.2)
+    assert scheduler.get_status()["last_run"] is not None
+
+
+def test_run_now_raises_when_disabled():
+    """run_now() must raise RuntimeError when the kill switch is off."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=False, interval_minutes=1),
+    )
+
+    try:
+        scheduler.run_now()
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "disabled" in str(e).lower()
+
+
+@pytest.mark.asyncio
+async def test_stop_clears_next_run():
+    """get_status.next_run must be None after stop() — the task is no longer scheduled."""
+    from services.scheduler import SignalScanScheduler
+
+    scraper = FakeScraper()
+    scheduler = SignalScanScheduler(
+        scraper,
+        config_provider=make_config(enabled=True, interval_minutes=0.001),
+    )
+
+    await scheduler.start()
+    # Wait for at least one tick so _next_run is populated
+    await asyncio.sleep(0.05)
+    assert scheduler.get_status()["next_run"] is not None
+
+    await scheduler.stop()
+    assert scheduler.get_status()["next_run"] is None
+    assert scheduler.get_status()["running"] is False
+

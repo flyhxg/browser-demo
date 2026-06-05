@@ -1,38 +1,40 @@
 <template>
-  <div id="app">
-    <aside class="sidebar">
-      <div class="sidebar-logo">
-        <span class="logo-icon">AI</span>
-        <span class="logo-text">Agent</span>
-      </div>
-      <nav class="sidebar-nav">
-        <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
-          <span class="nav-icon">💬</span>
-          <span class="nav-text">Chat</span>
-        </router-link>
-        <router-link to="/trading" class="nav-item" :class="{ active: $route.path === '/trading' }">
-          <span class="nav-icon">📈</span>
-          <span class="nav-text">Trading</span>
-        </router-link>
-        <router-link to="/workflow" class="nav-item" :class="{ active: $route.path === '/workflow' }">
-          <span class="nav-icon">⚡</span>
-          <span class="nav-text">Workflow</span>
-        </router-link>
-        <router-link to="/analysis" class="nav-item" :class="{ active: $route.path === '/analysis' }">
-          <span class="nav-icon">📉</span>
-          <span class="nav-text">Short Analysis</span>
-        </router-link>
-      </nav>
-      <div class="sidebar-footer">
-        <span class="footer-text">AI Trading Agent v1.0</span>
-      </div>
-    </aside>
-    <main class="main-content">
-      <div class="router-wrapper">
-        <router-view />
-      </div>
-    </main>
-  </div>
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">AI</span>
+      <span class="logo-text">Agent</span>
+    </div>
+    <nav class="sidebar-nav">
+      <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
+        <span class="nav-icon">💬</span>
+        <span class="nav-text">Chat</span>
+      </router-link>
+      <router-link to="/trading" class="nav-item" :class="{ active: $route.path === '/trading' }">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">Trading</span>
+      </router-link>
+      <router-link to="/workflow" class="nav-item" :class="{ active: $route.path === '/workflow' }">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-text">Workflow</span>
+      </router-link>
+      <router-link to="/analysis" class="nav-item" :class="{ active: $route.path === '/analysis' }">
+        <span class="nav-icon">📉</span>
+        <span class="nav-text">Short Selling</span>
+      </router-link>
+      <router-link to="/settings" class="nav-item" :class="{ active: $route.path === '/settings' }">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Settings</span>
+      </router-link>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="footer-text">AI Trading Agent v1.0</span>
+    </div>
+  </aside>
+  <main class="main-content">
+    <div class="router-wrapper">
+      <router-view />
+    </div>
+  </main>
 </template>
 
 <style>
