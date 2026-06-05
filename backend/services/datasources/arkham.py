@@ -99,3 +99,45 @@ async def _get_json(url: str, params: dict | None = None) -> httpx.Response | No
     except (httpx.HTTPError, asyncio.TimeoutError) as exc:
         logger.warning(f"Arkham request failed: {url} ({exc})")
         return None
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def get_exchange_netflow(token: str) -> dict[str, Any]:
+    """Per-token CEX netflow over the last 24h.
+
+    Endpoint: GET /token/top?tokenIds={cg_id}&orderByAgg=netflow&timeframe=24h
+    Returns: {"cex_netflow_24h": float, "cex_inflow_24h": float,
+              "cex_outflow_24h": float, "data_source": "arkham"}
+    """
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    cg_id = _symbol_to_cg_id(token)
+    url = f"{ARKHAM_API}/token/top"
+    params = {
+        "tokenIds": cg_id,
+        "orderByAgg": "netflow",
+        "timeframe": "24h",
+        "from": 0,
+        "size": 1,
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url, headers=_auth_headers(), params=params)
+        if resp.status_code == 401:
+            return {"error": "Invalid API key"}
+        if resp.status_code == 404:
+            return {"error": "Token not found", "data_source": "arkham"}
+        resp.raise_for_status()
+        data = resp.json()
+        tokens = data.get("tokens", [])
+        if not tokens:
+            return {"error": "No data", "data_source": "arkham"}
+        current = tokens[0].get("current", {})
+        inflow = float(current.get("inflowCexVolume", 0) or 0)
+        outflow = float(current.get("outflowCexVolume", 0) or 0)
+        return {
+            "cex_netflow_24h": inflow - outflow,
+            "cex_inflow_24h": inflow,
+            "cex_outflow_24h": outflow,
+            "data_source": "arkham",
+        }

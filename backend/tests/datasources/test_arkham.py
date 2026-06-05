@@ -3,7 +3,6 @@ import pytest
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="get_exchange_netflow pending Task 4", strict=False)
 async def test_get_exchange_netflow_returns_dict():
     from services.datasources.arkham import get_exchange_netflow
     result = await get_exchange_netflow("ETH")
@@ -50,3 +49,41 @@ def test_get_api_key_falls_back_to_env(monkeypatch):
     monkeypatch.setattr(arkham, "_key_from_config", lambda: "")
     monkeypatch.setenv("ARKHAM_API_KEY", "from-env")
     assert arkham._get_api_key() == "from-env"
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_netflow_no_key(monkeypatch):
+    from services.datasources import arkham
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "")
+    result = await arkham.get_exchange_netflow("BTC")
+    assert result == {"error": "ARKHAM_API_KEY not configured"}
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_netflow_happy_path(monkeypatch):
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {
+                "tokens": [{
+                    "token": {"id": "bitcoin", "symbol": "btc"},
+                    "current": {
+                        "inflowCexVolume": 100.0,
+                        "outflowCexVolume": 30.0,
+                    },
+                }],
+            }
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_exchange_netflow("BTC")
+    assert result["cex_netflow_24h"] == 70.0  # 100 - 30
+    assert result["data_source"] == "arkham"
