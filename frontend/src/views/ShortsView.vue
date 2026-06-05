@@ -105,7 +105,7 @@
         </div>
 
         <div class="analysis-content">
-          <!-- 核心指标四卡 -->
+          <!-- 核心指标四卡（多头方向,Phase 1a） -->
           <div class="analysis-metrics">
             <div class="metric-card" :class="fundingColorClass">
               <div class="metric-label">资金费率 (8h)</div>
@@ -114,26 +114,26 @@
               </div>
               <div class="metric-hint">{{ fundingHintText }}</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">空头拥挤度</div>
+            <div class="metric-card" :class="longCrowdClass">
+              <div class="metric-label">多头拥挤度</div>
               <div class="metric-value">
-                {{ ((selectedToken.crowdedness_score || 0) * 100).toFixed(0) }}%
+                {{ ((selectedToken.long_crowdedness || 0) * 100).toFixed(0) }}%
               </div>
-              <div class="metric-hint">{{ crowdHintText }}</div>
+              <div class="metric-hint">{{ longCrowdHintText }}</div>
             </div>
             <div class="metric-card" :class="squeezeClass">
               <div class="metric-label">轧空风险</div>
               <div class="metric-value">
-                {{ ((selectedToken.squeeze_risk || 0) * 100).toFixed(0) }}%
+                {{ ((selectedToken.long_squeeze_risk || 0) * 100).toFixed(0) }}%
               </div>
               <div class="metric-hint">{{ squeezeHintText }}</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">反弹潜力</div>
+            <div class="metric-card" :class="extensionClass">
+              <div class="metric-label">涨幅到位度</div>
               <div class="metric-value">
-                {{ ((selectedToken.rebound_potential || 0) * 100).toFixed(0) }}%
+                {{ ((selectedToken.extension_score || 0) * 100).toFixed(0) }}%
               </div>
-              <div class="metric-hint">价格回弹空间估算</div>
+              <div class="metric-hint">{{ extensionHintText }}</div>
             </div>
           </div>
 
@@ -146,9 +146,9 @@
                 height="280px"
               />
               <SentimentRadar
-                :crowdedness-score="selectedToken.crowdedness_score || 0"
-                :squeeze-risk="selectedToken.squeeze_risk || 0"
-                :rebound-potential="selectedToken.rebound_potential || 0"
+                :crowdedness-score="selectedToken.long_crowdedness || 0"
+                :squeeze-risk="selectedToken.long_squeeze_risk || 0"
+                :rebound-potential="selectedToken.extension_score || 0"
                 :heat-score="selectedToken.heat_score"
                 :funding-rate="selectedToken.funding_rate"
                 width="100%"
@@ -222,9 +222,9 @@
             <p class="recommendation-text">{{ tokenAnalysis.recommendation }}</p>
             <div class="signal-badges">
               <span v-if="tokenAnalysis.signals?.funding_extreme" class="signal-badge warning">⚠ 极端资金费率</span>
-              <span v-if="tokenAnalysis.signals?.overcrowded_short" class="signal-badge danger">🔥 空头过度拥挤</span>
+              <span v-if="tokenAnalysis.signals?.longs_crowded" class="signal-badge danger">🔥 多头过度拥挤</span>
               <span v-if="tokenAnalysis.signals?.squeeze_alert" class="signal-badge alert">💥 轧空警报</span>
-              <span v-if="tokenAnalysis.signals?.high_rebound_potential" class="signal-badge success">📈 反弹空间大</span>
+              <span v-if="tokenAnalysis.signals?.high_short_opportunity" class="signal-badge success">📈 做空机会高</span>
             </div>
           </div>
         </div>
@@ -238,6 +238,13 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { on as busOn } from '../composables/useMessageBus'
 import SentimentRadar from '../components/charts/SentimentRadar.vue'
 import FundingRateChart from '../components/charts/FundingRateChart.vue'
+import {
+  longCrowdClass as longCrowdClassFn,
+  longCrowdHintText as longCrowdHintTextFn,
+  extensionClass as extensionClassFn,
+  extensionHintText as extensionHintTextFn,
+} from '../utils/shortTokenLabels'
+import type { TokenAnalysis } from '../types'
 
 interface HotToken {
   symbol: string
@@ -250,26 +257,34 @@ interface HotToken {
   open_interest: number
   liquidation_price: number
   heat_score: number
-  // Short analysis fields
-  crowdedness_score?: number
-  squeeze_risk?: number
+  heat_rank?: number
+  updated_at?: string
+  // Short analysis (long-side direction, Phase 1a)
+  long_crowdedness?: number
+  long_squeeze_risk?: number
+  extension_score?: number
   short_risk_rating?: string
-  rebound_potential?: number
-  // Trade execution reference
+  short_grade?: string
+  short_opportunity_score?: number
+  // Hot tick derivations
+  oi_usd?: number
+  funding_annualized?: number
+  // Warm/cold fields (Phase 1b populates; rendered as 0 for now)
+  market_cap?: number
+  top10_holders_pct?: number
+  gini?: number
+  fdv_mcap_ratio?: number
+  sector?: string
+  consecutive_up_days?: number
+  trend_strength?: number
   high_24h?: number
   low_24h?: number
   atr?: number
-  oi_usd?: number
-  recommended_leverage?: number
+  rebound_multiple?: number
+  low_7d?: number
   stop_loss_price?: number
   take_profit_price?: number
-  funding_annualized?: number
-  short_grade?: string
-  // Trend & market context
-  market_cap?: number
-  consecutive_up_days?: number
-  trend_strength?: number
-  sector?: string
+  recommended_leverage?: number
 }
 
 const hotTokens = ref<HotToken[]>([])
@@ -277,7 +292,7 @@ const htLoading = ref(false)
 const scannerRunning = ref(false)
 const autoTradeEnabled = ref(false)
 const selectedToken = ref<HotToken | null>(null)
-const tokenAnalysis = ref<any>(null)
+const tokenAnalysis = ref<TokenAnalysis | null>(null)
 const analysisLoading = ref(false)
 
 const shortRatingClass = computed(() => {
@@ -325,16 +340,13 @@ const fundingHintText = computed(() => {
   return '资金费率中性'
 })
 
-const crowdHintText = computed(() => {
-  const c = selectedToken.value?.crowdedness_score ?? 0
-  if (c > 0.7) return '空头极度拥挤,警惕轧空'
-  if (c > 0.4) return '空头仓位偏高'
-  if (c > 0.2) return '持仓相对平衡'
-  return '空头仓位较轻'
-})
+const longCrowdClass = computed(() => longCrowdClassFn(selectedToken.value?.long_crowdedness))
+const longCrowdHintText = computed(() => longCrowdHintTextFn(selectedToken.value?.long_crowdedness))
+const extensionClass = computed(() => extensionClassFn(selectedToken.value?.extension_score))
+const extensionHintText = computed(() => extensionHintTextFn(selectedToken.value?.extension_score))
 
 const squeezeClass = computed(() => {
-  const s = selectedToken.value?.squeeze_risk ?? 0
+  const s = selectedToken.value?.long_squeeze_risk ?? 0
   if (s > 0.7) return 'extreme'
   if (s > 0.5) return 'high'
   if (s > 0.3) return 'medium'
@@ -342,7 +354,7 @@ const squeezeClass = computed(() => {
 })
 
 const squeezeHintText = computed(() => {
-  const s = selectedToken.value?.squeeze_risk ?? 0
+  const s = selectedToken.value?.long_squeeze_risk ?? 0
   if (s > 0.7) return '轧空风险高,谨慎做空'
   if (s > 0.5) return '轧空风险中等'
   if (s > 0.3) return '轧空风险偏低'
@@ -460,8 +472,15 @@ async function fetchAutoTradeStatus() {
 }
 
 // --- WebSocket subscription for live hot-tokens updates ---
+// Defensive: backend may briefly send a non-array payload (e.g. {} on connect),
+// or rows missing the new long-direction fields. Normalize before assigning.
+function normalizeHotTokens(data: unknown): HotToken[] {
+  if (!Array.isArray(data)) return []
+  return data as HotToken[]
+}
+
 const hotTokensOff = busOn('hot_tokens_update', (data) => {
-  hotTokens.value = data
+  hotTokens.value = normalizeHotTokens(data)
 })
 
 onUnmounted(() => {

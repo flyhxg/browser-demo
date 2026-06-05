@@ -95,6 +95,53 @@ export interface HotToken {
   heat_score: number
   heat_rank?: number
   updated_at?: string
+  // Short analysis (long-side direction, Phase 1a)
+  long_crowdedness?: number
+  long_squeeze_risk?: number
+  extension_score?: number
+  short_risk_rating?: string
+  short_grade?: string
+  short_opportunity_score?: number
+  // Hot tick derivations
+  oi_usd?: number
+  funding_annualized?: number
+  // Warm/cold fields (Phase 1b populates; rendered as 0 for now)
+  market_cap?: number
+  top10_holders_pct?: number
+  gini?: number
+  fdv_mcap_ratio?: number
+  sector?: string
+  consecutive_up_days?: number
+  trend_strength?: number
+  high_24h?: number
+  low_24h?: number
+  atr?: number
+  rebound_multiple?: number
+  low_7d?: number
+  stop_loss_price?: number
+  take_profit_price?: number
+  recommended_leverage?: number
+}
+
+// Per-token AI analysis response (returned by /api/hot_tokens/{symbol}/analysis).
+// Shape is a superset of base token fields plus nested metrics/signals/recommendation.
+// `signals` flags are the only ones rendered in the modal template, but we declare
+// the full nested shape so consumers can read additional flags safely.
+export interface TokenAnalysis {
+  symbol: string
+  recommendation: string
+  signals: {
+    funding_extreme: boolean
+    longs_crowded: boolean
+    squeeze_alert: boolean
+    high_short_opportunity: boolean
+    [key: string]: boolean
+  }
+  metrics: {
+    funding_annualized: number
+    oi_usd: number
+    [key: string]: number
+  }
 }
 
 export interface HotTokensUpdateData {
