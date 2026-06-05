@@ -86,4 +86,38 @@ async def test_get_exchange_netflow_happy_path(monkeypatch):
     monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
     result = await arkham.get_exchange_netflow("BTC")
     assert result["cex_netflow_24h"] == 70.0  # 100 - 30
+    assert result["cex_inflow_24h"] == 100.0
+    assert result["cex_outflow_24h"] == 30.0
     assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_netflow_http_error(monkeypatch):
+    """Module contract: never raise. On 5xx, return an error dict, don't propagate."""
+    from services.datasources import arkham
+    import httpx
+    import tenacity
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 500
+        def json(self):
+            return {}
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(
+                "500 Server Error", request=None, response=None
+            )
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+
+    # Bypass tenacity backoff for speed: stop after 1 attempt, no wait.
+    arkham.get_exchange_netflow.retry.stop = tenacity.stop_after_attempt(1)
+    arkham.get_exchange_netflow.retry.wait = tenacity.wait_fixed(0)
+
+    result = await arkham.get_exchange_netflow("BTC")
+    assert "error" in result
+    assert result.get("data_source") == "arkham"

@@ -109,6 +109,7 @@ async def get_exchange_netflow(token: str) -> dict[str, Any]:
     Returns: {"cex_netflow_24h": float, "cex_inflow_24h": float,
               "cex_outflow_24h": float, "data_source": "arkham"}
     """
+    # No-key branch keeps bare-dict shape: spec test asserts exact dict equality.
     if not _get_api_key():
         return {"error": "ARKHAM_API_KEY not configured"}
 
@@ -121,23 +122,27 @@ async def get_exchange_netflow(token: str) -> dict[str, Any]:
         "from": 0,
         "size": 1,
     }
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url, headers=_auth_headers(), params=params)
-        if resp.status_code == 401:
-            return {"error": "Invalid API key"}
-        if resp.status_code == 404:
-            return {"error": "Token not found", "data_source": "arkham"}
-        resp.raise_for_status()
-        data = resp.json()
-        tokens = data.get("tokens", [])
-        if not tokens:
-            return {"error": "No data", "data_source": "arkham"}
-        current = tokens[0].get("current", {})
-        inflow = float(current.get("inflowCexVolume", 0) or 0)
-        outflow = float(current.get("outflowCexVolume", 0) or 0)
-        return {
-            "cex_netflow_24h": inflow - outflow,
-            "cex_inflow_24h": inflow,
-            "cex_outflow_24h": outflow,
-            "data_source": "arkham",
-        }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=_auth_headers(), params=params)
+            if resp.status_code == 401:
+                return _safe_note("Invalid API key")
+            if resp.status_code == 404:
+                return _safe_note("Token not found")
+            resp.raise_for_status()
+            data = resp.json()
+            tokens = data.get("tokens", [])
+            if not tokens:
+                return _safe_note("No data")
+            current = tokens[0].get("current", {})
+            inflow = float(current.get("inflowCexVolume", 0) or 0)
+            outflow = float(current.get("outflowCexVolume", 0) or 0)
+            return {
+                "cex_netflow_24h": inflow - outflow,
+                "cex_inflow_24h": inflow,
+                "cex_outflow_24h": outflow,
+                "data_source": "arkham",
+            }
+    except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+        # Module contract: never raise. Return shape-consistent error dict.
+        return _safe_note(f"network error: {exc}")
