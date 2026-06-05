@@ -1,5 +1,18 @@
-"""Polymarket Prediction Market API endpoints."""
-import asyncio
+"""Polymarket Prediction Market API endpoints.
+
+`/start`, `/stop`, and `/status` dispatch through the scheduler
+registry (looking up `PolymarketScheduler` by `task_id=2`) rather
+than holding module-level globals. The actual `TopUsersPoller` /
+`PositionMonitor` / `PolymarketTrader` instances are owned by the
+scheduler — see `services/scheduler.PolymarketScheduler.start()` —
+and constructed via the injectable `poller_factory` / `monitor_factory`.
+
+`_handle_cluster_signal` and `_execute_signal` stay in this file
+because the scheduler is constructed in `main.py` (Task 6) with
+`signal_handler=_handle_cluster_signal` injected. The signal
+pathway writes to `polymarket_signals` / `polymarket_trades` /
+`polymarket_positions` and is unchanged.
+"""
 import logging
 import time
 from typing import Any
@@ -7,16 +20,16 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from services.database import get_db
-from services.polymarket_monitor import PositionMonitor
-from services.polymarket_poller import ClusterSignal, TopUsersPoller
-from services.polymarket_trader import PolymarketTrader
+from services.polymarket_poller import ClusterSignal
+from services.scheduler import get_scheduler
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/polymarket")
 
-# Global poller and monitor instances
-_polymarket_poller: TopUsersPoller | None = None
-_position_monitor: PositionMonitor | None = None
+# Module-level `task_id` for the Polymarket scheduler. Must match
+# `services.scheduler.PolymarketScheduler.TASK_ID`. Encoded as a
+# constant so the registry lookup is a single source of truth.
+_TASK_ID = 2
 
 
 @router.get("/signals")
@@ -182,77 +195,74 @@ async def update_polymarket_config(data: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/start")
 async def start_polymarket_polling() -> dict[str, Any]:
-    """Start the Polymarket signal polling service."""
-    global _polymarket_poller, _position_monitor
+    """Start the Polymarket signal polling service.
 
-    if _polymarket_poller and _polymarket_poller._running:
+    Looks up `PolymarketScheduler` in the registry (task_id=2) and
+    delegates `start()` to it. Returns 503 if the scheduler isn't
+    registered yet — this can happen during the deployment window
+    before Task 6 (main.py registration) is rolled out, and lets
+    the operator's UI surface a clear error instead of crashing.
+    """
+    scheduler = get_scheduler(_TASK_ID)
+    if scheduler is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Polymarket scheduler not registered — backend may be still starting up",
+        )
+
+    if scheduler.get_status().get("running"):
         return {"status": "already_running"}
 
-    # Load config
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM polymarket_config WHERE id = 1")
-    config = cursor.fetchone()
-    conn.close()
-
-    if not config:
-        return {"error": "Polymarket config not found"}
-
-    # Create trader
-    trader = PolymarketTrader(
-        api_key=config["api_key"],
-        api_secret=config["api_secret"],
-        api_passphrase=config["api_passphrase"],
-        private_key=config["private_key"],
-        dry_run=bool(config["dry_run"]) if config else True,
-    )
-
-    # Create and start poller
-    _polymarket_poller = TopUsersPoller(
-        poll_interval=config["poll_interval"] if config else 60,
-        cluster_min_users=config["cluster_min_users"] if config else 3,
-        cluster_min_value=config["cluster_min_value"] if config else 1000.0,
-        market_expiry_hours=config["market_expiry_hours"] if config else 6,
-        min_price=config["min_price"] if config else 0.01,
-        max_price=config["max_price"] if config else 0.99,
-    )
-
-    # Register signal handler
-    _polymarket_poller.on_signal(_handle_cluster_signal)
-    await _polymarket_poller.start()
-
-    # Start position monitor
-    _position_monitor = PositionMonitor(
-        trader=trader,
-        check_interval=30,
-    )
-    await _position_monitor.start()
-
+    await scheduler.start()
     return {"status": "started"}
 
 
 @router.post("/stop")
 async def stop_polymarket_polling() -> dict[str, Any]:
-    """Stop the Polymarket signal polling service."""
-    global _polymarket_poller, _position_monitor
+    """Stop the Polymarket signal polling service.
 
-    if _polymarket_poller:
-        await _polymarket_poller.stop()
-        _polymarket_poller = None
+    Looks up `PolymarketScheduler` in the registry (task_id=2) and
+    delegates `stop()` to it. `PolymarketScheduler.stop()` is
+    idempotent (safe to call when nothing is running), so the
+    response is always `{"status": "stopped"}` when the scheduler
+    is registered. Returns 503 if not yet registered.
+    """
+    scheduler = get_scheduler(_TASK_ID)
+    if scheduler is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Polymarket scheduler not registered — backend may be still starting up",
+        )
 
-    if _position_monitor:
-        await _position_monitor.stop()
-        _position_monitor = None
-
+    await scheduler.stop()
     return {"status": "stopped"}
 
 
 @router.get("/status")
 async def get_polymarket_status() -> dict[str, Any]:
-    """Get Polymarket service status."""
+    """Get Polymarket service status.
+
+    Poller and monitor are started together inside
+    `PolymarketScheduler.start()` and share the scheduler's `running`
+    flag, so the response collapses both to the same value. When the
+    scheduler is not registered (e.g. before Task 6's main.py change
+    is rolled out) we return `registered=False` rather than 503 — the
+    UI treats the absence of a registered scheduler as "service not
+    wired up yet" and shouldn't error.
+    """
+    scheduler = get_scheduler(_TASK_ID)
+    if scheduler is None:
+        return {
+            "poller_running": False,
+            "monitor_running": False,
+            "registered": False,
+        }
+
+    status = scheduler.get_status()
     return {
-        "poller_running": _polymarket_poller is not None and _polymarket_poller._running,
-        "monitor_running": _position_monitor is not None,
+        "poller_running": status.get("running", False),
+        "monitor_running": status.get("running", False),
+        "registered": True,
     }
 
 
