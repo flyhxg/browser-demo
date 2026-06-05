@@ -44,6 +44,7 @@ class BinanceSquareScraper:
                     "likes": post.get("likes", 0),
                     "comments": post.get("comments", 0),
                     "tokens": tokens,
+                    "created_at": post.get("created_at", ""),
                     "raw_data": str(post),
                 })
 
