@@ -38,6 +38,41 @@ def init_db() -> None:
         )
     """)
 
+    # Migration: add source_type column (idempotent)
+    cursor.execute("PRAGMA table_info(signals)")
+    sig_cols = {row[1] for row in cursor.fetchall()}
+    if "source_type" not in sig_cols:
+        cursor.execute("ALTER TABLE signals ADD COLUMN source_type TEXT DEFAULT 'live'")
+        # Backfill known mock authors
+        cursor.execute(
+            "UPDATE signals SET source_type = 'mock' "
+            "WHERE author IN ('TraderOne', 'CryptoWhale', 'BearHunter') "
+            "AND source_type IS NULL"
+        )
+
+    # Dedup existing rows by source_url before adding the unique index.
+    # Pre-existing mock data may have repeated (source_url) values that
+    # would block index creation. Keep the earliest row per source_url;
+    # Task 8's INSERT OR IGNORE prevents this from recurring.
+    # Idempotent: a no-op once the table is already deduped.
+    cursor.execute(
+        """
+        DELETE FROM signals
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM signals
+            WHERE source_url IS NOT NULL AND source_url != ''
+            GROUP BY source_url
+        )
+        AND source_url IS NOT NULL AND source_url != ''
+        """
+    )
+
+    # Unique index on source_url for dedup (idempotent)
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_source_url "
+        "ON signals(source_url) WHERE source_url != ''"
+    )
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signal_analysis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +135,7 @@ def init_db() -> None:
             sl_percentage REAL DEFAULT 3.0,
             min_confidence REAL DEFAULT 0.7,
             max_daily_loss REAL DEFAULT 100.0,
-            scan_interval_minutes INTEGER DEFAULT 5
+            scan_interval_minutes INTEGER DEFAULT 30
         )
     """)
 
@@ -317,7 +352,8 @@ def init_db() -> None:
 
     # Migration: add scheduler config columns for Phase 2.4 SignalScanScheduler.
     # Defaults: signal_scan_enabled=0 (kill switch off — first-deploy safe),
-    # signal_scan_interval_minutes=15 (matches the design's spec default).
+    # signal_scan_interval_minutes=30 (matches the design's spec default — public
+    # scrape cadence, not minute-level).
     # Idempotent via PRAGMA table_info check (same pattern as the
     # max_positions / polymarket SL/TP migrations above).
     if "signal_scan_enabled" not in trade_cols:
@@ -326,7 +362,7 @@ def init_db() -> None:
         )
     if "signal_scan_interval_minutes" not in trade_cols:
         cursor.execute(
-            "ALTER TABLE trading_config ADD COLUMN signal_scan_interval_minutes INTEGER DEFAULT 15"
+            "ALTER TABLE trading_config ADD COLUMN signal_scan_interval_minutes INTEGER DEFAULT 30"
         )
 
     conn.commit()
