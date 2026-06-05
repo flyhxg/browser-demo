@@ -85,30 +85,40 @@ class BinanceSquareScraper:
         matches = self.TOKEN_PATTERN.findall(content)
         return list(set(matches))
 
-    def save_to_db(self, posts: list[dict[str, Any]]) -> None:
-        """Save scraped posts to database."""
+    def save_to_db(self, posts: list[dict[str, Any]]) -> int:
+        """Save scraped posts to the database. Returns the count of rows actually inserted.
+
+        Uses INSERT OR IGNORE so re-running with the same posts (same
+        source_url) is a no-op — the UNIQUE partial index on source_url
+        (created in init_db) is the source of truth for dedup.
+        """
         conn = get_db()
         cursor = conn.cursor()
-
+        inserted = 0
         for post in posts:
             cursor.execute(
                 """
-                INSERT INTO signals (source, source_url, author, content, likes, comments, raw_data, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                INSERT OR IGNORE INTO signals
+                    (source, source_url, author, content, likes, comments, raw_data, status, source_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'live')
                 """,
                 (
-                    post["source"],
-                    post["source_url"],
-                    post["author"],
-                    post["content"],
-                    post["likes"],
-                    post["comments"],
-                    post["raw_data"],
+                    post.get("source", "binance_square"),
+                    post.get("source_url", ""),
+                    post.get("author", "unknown"),
+                    post.get("content", ""),
+                    post.get("likes", 0),
+                    post.get("comments", 0),
+                    post.get("raw_data", str(post)),
                 ),
             )
-
+            if cursor.rowcount > 0:
+                inserted += 1
         conn.commit()
         conn.close()
+        if inserted:
+            logger.info(f"[BinanceSquareScraper] inserted {inserted}/{len(posts)} posts")
+        return inserted
 
     async def scrape_hot(
         self,
