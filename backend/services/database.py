@@ -369,6 +369,19 @@ def init_db() -> None:
             "ALTER TABLE trading_config ADD COLUMN signal_scan_interval_minutes INTEGER DEFAULT 30"
         )
 
+    # One-shot backfill: legacy rows from before the migration have
+    # signal_scan_interval_minutes=2 (the old hardcoded default). The new
+    # SQL DEFAULT is 30. The value 2 is the only value we can be sure is
+    # a legacy artifact (no realistic operator would deliberately pick
+    # 2-minute scraping for a public feed). Runs silently — no log.
+    cursor.execute(
+        """
+        UPDATE trading_config
+        SET signal_scan_interval_minutes = 30
+        WHERE id = 1 AND signal_scan_interval_minutes = 2
+        """
+    )
+
     conn.commit()
     conn.close()
 

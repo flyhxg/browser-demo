@@ -38,7 +38,7 @@ class BinanceSquareScraper:
             if tokens:
                 posts.append({
                     "source": "binance_square",
-                    "source_url": post.get("url", ""),
+                    "source_url": post.get("source_url", ""),
                     "author": post.get("author", "unknown"),
                     "content": content,
                     "likes": post.get("likes", 0),
