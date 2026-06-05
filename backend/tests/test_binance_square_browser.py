@@ -1,4 +1,6 @@
 """Unit tests for BinanceSquareBrowser. All offline via HTML fixtures."""
+from datetime import datetime, timedelta
+
 import pytest
 
 from services.binance_square_browser import (
@@ -7,6 +9,7 @@ from services.binance_square_browser import (
     LoginWallError,
     ParseError,
     RateLimitError,
+    _parse_relative_time,
 )
 
 
@@ -157,3 +160,93 @@ async def test_fetch_posts_propagates_login_wall_from_injected_page():
     browser = BinanceSquareBrowser(page=FakePage(html))
     with pytest.raises(LoginWallError):
         await browser.fetch_posts(limit=5)
+
+
+# --- _parse_relative_time unit tests ---
+
+
+def test_parse_relative_time_minutes():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("5m", now) == now - timedelta(minutes=5)
+    assert _parse_relative_time("30m", now) == now - timedelta(minutes=30)
+
+
+def test_parse_relative_time_hours():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("19h", now) == now - timedelta(hours=19)
+    assert _parse_relative_time("1h", now) == now - timedelta(hours=1)
+
+
+def test_parse_relative_time_days():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("1d", now) == now - timedelta(days=1)
+
+
+def test_parse_relative_time_yesterday():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("Yesterday", now) == now - timedelta(days=1)
+
+
+def test_parse_relative_time_just_now():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("Just now", now) == now
+    assert _parse_relative_time("now", now) == now
+
+
+def test_parse_relative_time_month_day_current_year():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    # May 3, 2026 is in the past relative to June 5, 2026
+    assert _parse_relative_time("May 3", now) == datetime(2026, 5, 3)
+
+
+def test_parse_relative_time_month_day_rolls_to_previous_year():
+    now = datetime(2026, 1, 15, 12, 0, 0)
+    # Dec 25 of "this year" would be 2026-12-25 which is in the future
+    # relative to Jan 15, 2026, so it should roll to 2025-12-25
+    assert _parse_relative_time("Dec 25", now) == datetime(2025, 12, 25)
+
+
+def test_parse_relative_time_unparseable_returns_min():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    assert _parse_relative_time("", now) == datetime.min
+    assert _parse_relative_time("garbage", now) == datetime.min
+
+
+# --- _parse_html sort order test ---
+
+
+def test_parse_html_returns_posts_newest_first():
+    """Posts must be sorted by created_at descending."""
+    html = _load_fixture("home_with_posts.html")
+    browser = BinanceSquareBrowser()
+    # Pin `now` to a known reference. The fixture has times like "19h" and "Jun 3".
+    # We use a "now" close to those so the sort produces a meaningful order.
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    posts = browser._parse_html(html, limit=30, now=now)
+    assert len(posts) >= 2, "need at least 2 posts to test sort order"
+
+    # Each post must have created_at
+    for p in posts:
+        assert "created_at" in p
+        # Sanity: parseable ISO 8601
+        datetime.fromisoformat(p["created_at"])
+
+    # Sort order: descending (newest first)
+    times = [datetime.fromisoformat(p["created_at"]) for p in posts]
+    assert times == sorted(times, reverse=True), (
+        f"posts not sorted newest first: first={times[0]}, last={times[-1]}"
+    )
+
+
+def test_parse_html_includes_created_at_field():
+    """Each post dict must include the created_at ISO string."""
+    html = _load_fixture("home_with_posts.html")
+    browser = BinanceSquareBrowser()
+    posts = browser._parse_html(html, limit=5, now=datetime(2026, 6, 5, 12, 0, 0))
+    assert posts
+    for p in posts:
+        assert "created_at" in p
+        # Should be an ISO string
+        assert isinstance(p["created_at"], str)
+        # Should be parseable
+        datetime.fromisoformat(p["created_at"])

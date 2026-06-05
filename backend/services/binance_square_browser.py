@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from bs4 import BeautifulSoup
@@ -26,6 +27,7 @@ SELECTORS = {
     "content": 'div.card__description.rich-text',
     "likes": 'div.thumb-up-button.card-function-item span.current',
     "comments": 'div.comments-icon.card-function-item span.current',
+    "create_time": "div.create-time",
     "login_wall_marker": "input[type='password']",
     "captcha_marker": "verify you are human",  # matched case-insensitive
 }
@@ -143,13 +145,19 @@ class BinanceSquareBrowser:
         self._launched_page = page
         return page
 
-    def _parse_html(self, html: str, limit: int) -> list[dict[str, Any]]:
-        """Parse Binance Square HTML into raw post dicts.
+    def _parse_html(self, html: str, limit: int, now: Optional[datetime] = None) -> list[dict[str, Any]]:
+        """Parse Binance Square HTML into raw post dicts, sorted newest first.
 
-        Detection order: captcha → login wall → empty → extract posts.
+        Detection order: captcha → login wall → empty → extract posts → sort by time.
         Posts without a $XXX / #XXX token mention are dropped — the downstream
         pipeline only cares about tokenised signal.
+
+        `now` lets tests pin the reference time. The fixture's relative time
+        strings ("19h", "11h") can only be sorted against a known anchor.
         """
+        if now is None:
+            now = datetime.now()
+
         _detect_error_page(html)
 
         soup = BeautifulSoup(html, "html.parser")
@@ -179,6 +187,12 @@ class BinanceSquareBrowser:
             likes = _parse_int(likes_el.get_text() if likes_el else "")
             comments = _parse_int(comments_el.get_text() if comments_el else "")
 
+            # Create time (newest-first sort key)
+            time_el = card.select_one(SELECTORS["create_time"])
+            time_text = time_el.get_text(strip=True) if time_el else ""
+            created_at_dt = _parse_relative_time(time_text, now)
+            created_at = created_at_dt.isoformat()
+
             tokens = _extract_tokens(content)
             if not tokens:
                 continue  # spec: only posts that mention a token go to the pipeline
@@ -191,10 +205,16 @@ class BinanceSquareBrowser:
                 "likes": likes,
                 "comments": comments,
                 "tokens": tokens,
+                "created_at": created_at,
+                "_sort_key": created_at_dt,  # private — stripped before return
             })
-            if len(posts) >= limit:
-                break
-        return posts
+
+        # Newest first; ties broken by source_url for stable order
+        posts.sort(key=lambda p: (p["_sort_key"], p["source_url"]), reverse=True)
+        for p in posts:
+            del p["_sort_key"]
+
+        return posts[:limit]
 
     async def aclose(self) -> None:
         """Cleanly shut down the browser. Idempotent."""
@@ -256,6 +276,51 @@ def _parse_int(text: str) -> int:
 def _extract_tokens(content: str) -> list[str]:
     # Sort for deterministic ordering — `set` alone has arbitrary iteration order.
     return sorted(set(_TOKEN_PATTERN.findall(content)))
+
+
+def _parse_relative_time(text: str, now: datetime) -> datetime:
+    """Parse Binance Square's humanised time strings into an absolute datetime.
+
+    Examples: "5m" / "1h" / "19h" / "1d" / "Yesterday" / "Jun 3" / "Just now".
+    Returns a datetime offset from `now`. Falls back to `datetime.min` for
+    unparseable input — this keeps unparseable cards out of the way of
+    parseable ones in a newest-first sort (they land at the bottom).
+    """
+    if not text:
+        return datetime.min
+    s = text.strip().lower()
+    if not s:
+        return datetime.min
+
+    # Relative: "5m" / "1h" / "19h" / "1d" / "30s"
+    if s.endswith("s") and s[:-1].isdigit():
+        return now - timedelta(seconds=int(s[:-1]))
+    if s.endswith("m") and s[:-1].isdigit():
+        return now - timedelta(minutes=int(s[:-1]))
+    if s.endswith("h") and s[:-1].isdigit():
+        return now - timedelta(hours=int(s[:-1]))
+    if s.endswith("d") and s[:-1].isdigit():
+        return now - timedelta(days=int(s[:-1]))
+
+    # "yesterday"
+    if "yesterday" in s:
+        return now - timedelta(days=1)
+
+    # "just now" / "now"
+    if "now" in s:
+        return now
+
+    # "Jun 3" / "Jun 3," — assume current year, unless that's in the future,
+    # in which case use last year.
+    try:
+        # Binance format: "Jun 3" (no year). strptime with %b %d.
+        parsed = datetime.strptime(s.replace(",", ""), "%b %d")
+        parsed = parsed.replace(year=now.year)
+        if parsed > now:
+            parsed = parsed.replace(year=now.year - 1)
+        return parsed
+    except ValueError:
+        return datetime.min
 
 
 # --- Module-level singleton ---
