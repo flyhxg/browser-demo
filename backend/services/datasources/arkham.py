@@ -146,3 +146,53 @@ async def get_exchange_netflow(token: str) -> dict[str, Any]:
     except (httpx.HTTPError, asyncio.TimeoutError) as exc:
         # Module contract: never raise. Return shape-consistent error dict.
         return _safe_note(f"network error: {exc}")
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def get_whale_movements(token: str, min_value_usd: float = 1_000_000.0) -> dict[str, Any]:
+    """Top high-value transfers for a token in the last 24h.
+
+    Endpoint: GET /transfers?tokens={cg_id}&timeLast=24h&usdGte={min}&limit=10
+    Returns: {"whale_movements": [...], "count": int, "data_source": "arkham"}
+    """
+    # No-key branch keeps bare-dict shape: spec test asserts exact dict equality.
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    cg_id = _symbol_to_cg_id(token)
+    url = f"{ARKHAM_API}/transfers"
+    params = {
+        "tokens": cg_id,
+        "timeLast": "24h",
+        "usdGte": min_value_usd,
+        "limit": 10,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=_auth_headers(), params=params)
+            if resp.status_code == 401:
+                return _safe_note("Invalid API key")
+            if resp.status_code == 404:
+                # Empty data, not an error: keep shape distinct from _safe_note.
+                return {"whale_movements": [], "note": "No transfers found"}
+            resp.raise_for_status()
+            data = resp.json()
+            transfers = data.get("transfers", []) or data.get("transfersArray", [])
+            return {
+                "whale_movements": [
+                    {
+                        "from": t.get("fromAddress", t.get("from")),
+                        "to": t.get("toAddress", t.get("to")),
+                        "amount": t.get("tokenAmount", t.get("amount")),
+                        "amount_usd": t.get("usdValue", t.get("amountUsd")),
+                        "blockchain": t.get("chain") or t.get("blockchain"),
+                        "timestamp": t.get("blockTimestamp") or t.get("timestamp"),
+                    }
+                    for t in transfers
+                ],
+                "count": len(transfers),
+                "data_source": "arkham",
+            }
+    except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+        # Module contract: never raise. Return shape-consistent error dict.
+        return _safe_note(f"network error: {exc}")
