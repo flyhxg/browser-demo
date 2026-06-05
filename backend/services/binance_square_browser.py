@@ -78,6 +78,7 @@ class BinanceSquareBrowser:
         self._injected_page = page
         self._browser = None
         self._playwright = None
+        self._launched_page = None
         self._last_fetch_at: Optional[float] = None
 
     async def fetch_posts(self, limit: int) -> list[dict[str, Any]]:
@@ -98,21 +99,28 @@ class BinanceSquareBrowser:
             self._last_fetch_at is not None
             and (time.time() - self._last_fetch_at) > self.IDLE_RELOAD_SECONDS
         ):
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
             try:
                 await page.goto(cfg["url"], wait_until="domcontentloaded", timeout=30000)
-            except Exception as e:
-                raise RateLimitError(f"goto failed (idle reload): {e}")
+            except PlaywrightTimeoutError as e:
+                raise BrowserError(f"goto timed out (idle reload): {e}")
 
         html = await page.content()
         self._last_fetch_at = time.time()
         return self._parse_html(html, limit)
 
     async def _get_or_launch_page(self, cfg: dict[str, Any]):
-        """Lazy-launch a chromium and return a configured page. Test-only shortcut: tests inject a page in __init__."""
+        """Lazy-launch a chromium and return a configured page. Reuses the same page across calls."""
         from playwright.async_api import async_playwright
 
-        if self._browser is not None and getattr(self._browser, "is_connected", lambda: True)():
-            return await self._browser.new_page()  # type: ignore[attr-defined]
+        # `is_connected` is a property; never call it with parens.
+        if self._browser is not None and self._browser.is_connected:
+            if self._launched_page is not None and not self._launched_page.is_closed():
+                return self._launched_page
+            # Old page was closed; create a fresh one
+            self._launched_page = await self._browser.new_page()
+            return self._launched_page
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
@@ -132,6 +140,7 @@ class BinanceSquareBrowser:
         for _ in range(int(cfg.get("scroll_passes", 2))):
             await page.mouse.wheel(0, 1200)
             await page.wait_for_timeout(int(cfg.get("scroll_pause_ms", 2500)))
+        self._launched_page = page
         return page
 
     def _parse_html(self, html: str, limit: int) -> list[dict[str, Any]]:
@@ -189,6 +198,12 @@ class BinanceSquareBrowser:
 
     async def aclose(self) -> None:
         """Cleanly shut down the browser. Idempotent."""
+        if self._launched_page is not None:
+            try:
+                await self._launched_page.close()
+            except Exception as e:
+                logger.debug(f"[BinanceSquareBrowser] page close failed: {e}")
+            self._launched_page = None
         if self._browser is not None:
             try:
                 await self._browser.close()
