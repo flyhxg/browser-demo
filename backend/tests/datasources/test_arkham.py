@@ -483,3 +483,73 @@ async def test_get_smart_money_flow_handles_empty_chain(monkeypatch):
     result = await arkham.get_smart_money_flow("ETH")
     assert result["smart_money_netflow"] == 0.0
     assert all(v == 0.0 for v in result["by_entity"].values())
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_reserves_aggregates(monkeypatch):
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    # kraken absent → 404 (skipped from aggregate). The other 5 entities
+    # (okx, bybit, bitfinex, htx, kucoin) also 404 by design.
+    exchange_balances = {
+        "binance":  1_000_000.0,
+        "coinbase": 500_000.0,
+    }
+
+    class FakeResp:
+        def __init__(self, entity):
+            self.status_code = 200 if entity in exchange_balances else 404
+            self._entity = entity
+        def json(self):
+            usd = exchange_balances[self._entity]
+            return {"balances": {"ethereum": [
+                {"symbol": "ETH", "id": "ethereum", "usd": usd},
+            ]}}
+        def raise_for_status(self): return None  # add per T4-T7 pattern
+
+    async def fake_get(self, url, params=None, **kwargs):  # self per T4-T7
+        entity = url.split("/")[-1]
+        return FakeResp(entity)
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_exchange_reserves("ETH")
+
+    # binance + coinbase = 1.5M (kraken + 5 others 404)
+    assert abs(result["exchange_reserves_usd"] - 1_500_000.0) < 0.01
+    assert "binance" in result["by_exchange"]
+    assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_reserves_no_key(monkeypatch):
+    from services.datasources import arkham
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "")
+    result = await arkham.get_exchange_reserves("ETH")
+    assert result == {"error": "ARKHAM_API_KEY not configured"}
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_reserves_filters_by_token(monkeypatch):
+    """Balances for unrelated tokens (different `id`) should be excluded from the sum."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"balances": {"ethereum": [
+                {"symbol": "ETH", "id": "ethereum", "usd": 100.0},
+                {"symbol": "USDC", "id": "usd-coin", "usd": 999_999.0},  # should be skipped
+            ]}}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_exchange_reserves("ETH")
+    # 8 exchanges, each contributing 100 USD of ETH (USDC is filtered out)
+    assert result["exchange_reserves_usd"] == 800.0

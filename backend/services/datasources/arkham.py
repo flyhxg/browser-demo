@@ -279,3 +279,42 @@ async def get_smart_money_flow(token: str, days: int = 7) -> dict[str, Any]:
         "entity_count": len(by_entity),
         "data_source": "arkham",
     }
+
+
+async def get_exchange_reserves(token: str) -> dict[str, Any]:
+    """Sum of exchange reserves for a token across known exchange entities.
+
+    Endpoint: GET /balances/entity/{entity} (one call per exchange, in parallel)
+    """
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    cg_id = _symbol_to_cg_id(token)
+
+    async def fetch_one(entity: str) -> tuple[str, float]:
+        try:
+            url = f"{ARKHAM_API}/balances/entity/{entity}"
+            resp = await _get_json(url, params={"chains": "ethereum"})
+            if resp is None or resp.status_code != 200:
+                return entity, 0.0
+            data = resp.json()
+            chain_data = data.get("balances", {}).get("ethereum", []) or []
+            total = sum(
+                float(b.get("usd", 0) or 0)
+                for b in chain_data
+                if (b.get("id") or "").lower() == cg_id.lower()
+            )
+            return entity, total
+        except Exception as exc:
+            logger.warning(f"exchange balances fetch failed for {entity}: {exc}")
+            return entity, 0.0
+
+    results = await asyncio.gather(*(fetch_one(e) for e in EXCHANGE_ENTITIES))
+    by_exchange = dict(results)
+    total = sum(by_exchange.values())
+    return {
+        "exchange_reserves_usd": round(total, 2),
+        "by_exchange": {k: round(v, 2) for k, v in by_exchange.items()},
+        "exchange_count": len(by_exchange),
+        "data_source": "arkham",
+    }
