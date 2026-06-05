@@ -195,8 +195,9 @@ The `decision_steps` field is the user's primary verification surface. Each step
 
 **Failure modes:**
 - Token data fetch fails (timeout / 404): `token_contexts_json` shows `"error": "no data"` for that token; LLM still analyzes based on post + its own knowledge
-- LLM provider not configured: `analyze()` returns `{"opportunities": []}`; the post is marked "not analyzed" in UI
-- LLM call exception: opportunity row not inserted; post stays at `is_opportunity=0`; user can manually re-analyze
+- LLM provider not configured: `analyze()` returns `{"opportunities": []}`; the post is marked "not analyzed" in UI (`analyzed_at` stays NULL, no opportunity rows are inserted)
+- LLM call exception: no opportunity rows are inserted; post's `analyzed_at` stays NULL; user can manually re-analyze via `/api/posts/{id}/reanalyze`
+- LLM returns malformed JSON or missing fields: `_parse_response` returns `{"opportunities": []}`; same as the unconfigured case. Logged at WARNING for observability.
 
 **Persistence per post:**
 
@@ -219,17 +220,23 @@ VALUES (...);
 
 ```python
 async def _analyze_one(self, post_id: int) -> None:
+    # kill switch: if disabled in config, persist a stub and bail
+    if not self._config_provider().get("signal_auto_analyze", True):
+        logger.debug(f"[SignalScanScheduler] auto-analyze disabled; skipping post {post_id}")
+        return
+
     try:
         post = _load_post(post_id)
         tokens = _extract_tokens(post)   # prefer tradingPairs JSON, regex fallback
         token_contexts = await asyncio.gather(
-            *(self._fetch_token_context(t) for t in tokens),
+            *(self._token_context_fetcher(t) for t in tokens),
             return_exceptions=True,
         )
         result = await SignalAnalyzer().analyze(post["content"], token_contexts)
         for opp in result["opportunities"]:
             opp_id = _persist_opportunity(post_id, opp)
-            _persist_token_snapshot(post_id, opp["token"], token_contexts)
+            _persist_token_snapshot(post_id, opp_id, opp["token"], token_contexts)
+        _set_analyzed_at(post_id)
         if self._ws_broadcast:
             await self._ws_broadcast("post:analyzed", {
                 "post_id": post_id, "opportunities": result["opportunities"],
@@ -238,33 +245,48 @@ async def _analyze_one(self, post_id: int) -> None:
         logger.warning(f"analyze post {post_id} failed: {e}")
 ```
 
+`self._token_context_fetcher` is a callable held by the scheduler (dependency-injected, defaults to `SignalAnalyzer._fetch_token_context`). The scheduler owns the fire-and-forget task lifecycle; the analyzer owns the LLM call + parsing + the token-data HTTP fetches. This keeps the two concerns separate and lets tests inject a fake fetcher without touching the analyzer.
+
 `_parse_response` handles the new `{"opportunities": [...]}` shape (handles ```json``` blocks, thinking text). When LLM is not configured, returns `{"opportunities": []}`.
 
 ### Token context fetcher
 
-Lives in `backend/services/signal_analyzer.py` (or a new `services/token_context.py` if it grows). One method per data source:
+Lives in `backend/services/signal_analyzer.py` as a classmethod on `SignalAnalyzer` (or moved to a dedicated `services/token_context.py` if the fetcher grows). The scheduler calls it through a dependency-injected callable so tests can swap in a fake:
 
 ```python
-async def _fetch_token_context(self, symbol: str) -> dict:
-    """Fetch market_cap + RSI + MACD for one symbol. Returns dict or {'error': ...}."""
-    ctx = {"symbol": symbol}
-    try:
-        details = await get_coin_details(symbol.lower())
-        ctx["market_cap_usd"] = details.get("market_cap")
-        ctx["market_cap_rank"] = details.get("market_cap_rank")
-        ctx["price_change_24h_pct"] = details.get("price_change_24h")
-    except Exception as e:
-        ctx["error_market"] = str(e)
-    try:
-        klines = await get_klines(symbol, interval="1h", limit=100)
-        closes = [k["close"] for k in klines]
-        ctx["rsi_14"] = calculate_rsi(closes, period=14)
-        macd = calculate_macd(closes)   # returns (line, signal, hist, state)
-        ctx["macd_state"] = macd["state"]    # "bullish_cross" | "bearish_cross" | "above_zero" | ...
-        ctx["macd_hist"] = macd["hist"]
-    except Exception as e:
-        ctx["error_tech"] = str(e)
-    return ctx
+class SignalAnalyzer:
+    @staticmethod
+    async def fetch_token_context(symbol: str) -> dict:
+        """Fetch market_cap + RSI + MACD for one symbol. Returns dict or {'error': ...}.
+
+        Never raises — all per-source failures are captured in the returned dict
+        under `error_market` / `error_tech` keys. The LLM still receives a
+        partial context and reasons with what it has.
+        """
+        ctx = {"symbol": symbol}
+        try:
+            details = await get_coin_details(symbol.lower())
+            ctx["market_cap_usd"] = details.get("market_cap")
+            ctx["market_cap_rank"] = details.get("market_cap_rank")
+            ctx["price_change_24h_pct"] = details.get("price_change_24h")
+        except Exception as e:
+            ctx["error_market"] = str(e)
+        try:
+            klines = await get_klines(symbol, interval="1h", limit=100)
+            closes = [k["close"] for k in klines]
+            ctx["rsi_14"] = calculate_rsi(closes, period=14)
+            macd = calculate_macd(closes)   # returns (line, signal, hist, state)
+            ctx["macd_state"] = macd["state"]    # "bullish_cross" | "bearish_cross" | "above_zero" | ...
+            ctx["macd_hist"] = macd["hist"]
+        except Exception as e:
+            ctx["error_tech"] = str(e)
+        return ctx
+```
+
+Wired into the scheduler:
+
+```python
+self._token_context_fetcher = token_context_fetcher or SignalAnalyzer.fetch_token_context
 ```
 
 Reuses existing `services/datasources/coingecko.py:get_coin_details` and `services/datasources/technical.py:get_klines / calculate_rsi / calculate_macd` — no new dependencies.
@@ -339,10 +361,15 @@ CREATE INDEX IF NOT EXISTS idx_post_feedback_post ON post_feedback(post_id);
 The existing `signals` table has 113 rows. To avoid breaking the running app:
 
 1. **Create new tables** (`opportunities`, `token_metric_snapshots`, `post_feedback`) first.
-2. **Rename** `signals` → `posts` via `ALTER TABLE signals RENAME TO posts`.
-3. **Update FK references** in legacy tables that point to `signals` (e.g. `trades.signal_id`, `signal_validation`):
+2. **Drop legacy tables** that are now superseded:
+   - `signal_analysis` — purpose now served by `opportunities` (1:N from posts, LLM output per token). No data to preserve (old `signal_analysis` rows were created by the manual `/validate` button and have no historical value).
+   - `signal_validation` — purpose now served by `token_metric_snapshots` (per-token data fetched at analysis time). No data to preserve (validations were transient and tied to the old single-LLM-call flow).
+3. **Rename** `signals` → `posts` via `ALTER TABLE signals RENAME TO posts`.
+4. **Update FK references in legacy tables** that point to `signals` (e.g. `trades.signal_id`):
    - SQLite doesn't auto-update FK references on rename. Use `PRAGMA foreign_keys = OFF; ...; PRAGMA foreign_keys = ON` and re-create the FK tables, or leave FKs as soft references (current code reads by `signal_id` column without enforcing FK at insert time).
-4. **Backfill column renames in queries** — `signal_id` becomes `post_id` in new code; old code paths can use a SQL view `CREATE VIEW signals AS SELECT * FROM posts` for the duration of the transition. View lets `api/trading.py` and the scheduler keep reading from `signals` until they're updated.
+   - The 113 existing posts will have `signal_id` (now `post_id` in new code) values that still match the renamed `posts.id` values — SQLite preserves IDs across RENAME.
+5. **Backfill column renames in queries** — `signal_id` becomes `post_id` in new code; old code paths can use a SQL view `CREATE VIEW signals AS SELECT * FROM posts` for the duration of the transition. View lets `api/trading.py` and the scheduler keep reading from `signals` until they're updated.
+6. **Update test fixtures** (`test_database.py`, `test_signal_scraper_dedup.py`, `test_database_trades.py`) — these reference `signals` / `signal_analysis` directly. They need to either use the `signals` view or be updated to use the new table names.
 
 This is a one-shot migration. The view is dropped once the call sites are updated.
 
@@ -359,7 +386,7 @@ Endpoints renamed/extended for the Post/Opportunity split. Old `/api/trading/sig
 | POST | `/api/posts/{id}/reanalyze` | **new** — manual re-run of LLM (preserves old `opportunities` rows, inserts new ones) |
 | POST | `/api/posts/{id}/skip` | **new** — sets `is_opportunity=0` on all opportunities of this post (user override) |
 | POST | `/api/posts/{id}/feedback` | **new** — body `{feedback: "good"|"bad", comment?: str}` → INSERT into `post_feedback` |
-| GET | `/api/posts/stats` | **new** — `{total_posts, total_opportunities, is_opportunity_count, feedback: {good, bad, accuracy_pct}, last_24h: {...}}` |
+| GET | `/api/posts/stats` | **new** — `{total_posts, total_opportunities, is_opportunity_count, feedback: {good, bad, accuracy_pct}, last_24h: {...}}`. `accuracy_pct = good / (good + bad) * 100` over all rated posts; `null` when no ratings exist. |
 | GET | `/api/trading/signals` | **kept** — view-backed; reads from `posts` via SQL view. Same shape as `/api/posts` for backwards compat. |
 | POST | `/api/trading/signals/{id}/validate` | **kept** — now calls `_analyze_one` internally (replaces the inline LLM call) |
 
@@ -457,7 +484,7 @@ In `frontend/src/views/TradingView.vue`:
   - POST `/api/posts/{id}/feedback` inserts into `post_feedback`
   - GET `/api/posts/stats` aggregates correctly
   - GET `/api/trading/signals` still works via SQL view (backwards compat)
-- `test_post_feedback.py` (new): feedback table CRUD; uniqueness rules (one feedback per user per post — or unlimited? — see open question).
+- `test_post_feedback.py` (new): feedback table CRUD. The spec allows **unlimited feedback per post** (users can change their mind: 👍 → 👎 produces two rows; the latest one wins for stats display, but history is preserved for calibration analysis). The `accuracy_pct` calculation uses the **latest** feedback per post.
 - Headless e2e: `tests/test_posts_pipeline_headless.py` — fake scraper + fake analyzer + real DB + real API; assert end-to-end flow from `_tick` → posts row → opportunities rows → API response.
 
 ## Configuration
@@ -502,3 +529,6 @@ None — resolved in this conversation:
 - Decision visibility: structured `decision_steps` numbered list (primary) + reasoning TL;DR (secondary) + token snapshot (data backing the steps) + 👍/👎
 - Execution: user-driven, no auto
 - Schema: rename `signals` → `posts`, new `opportunities` (1:N with `decision_steps`) and `token_metric_snapshots` tables; back-compat via SQL view
+- Feedback: unlimited per post; latest wins for `accuracy_pct`, history preserved
+- Token context fetcher: lives on `SignalAnalyzer` (classmethod), dependency-injected into the scheduler for testability
+- Auto-LLM kill switch: `config.signal_auto_analyze` checked at the top of `_analyze_one`
