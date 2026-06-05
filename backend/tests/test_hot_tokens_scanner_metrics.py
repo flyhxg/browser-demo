@@ -98,16 +98,17 @@ def test_opportunity_score_weights_sum_to_one_when_inputs_one():
 
 
 def test_opportunity_score_dist_neutral_when_top10_unfilled():
-    # top10=0 (cache miss) → 0.5
+    # top10=0 (cache miss) → dist=0.5 neutral
+    # crowd=0.5*0.6 + 0.5*0.4 = 0.5
+    # ext=5.0/10.0 = 0.5
+    # liq=min(5e8/1e9,1.0)*0.6 + min(50e6/100e6,1.0)*0.4 = 0.5*0.6 + 0.5*0.4 = 0.5
+    # dist=0.5
+    # expected = 0.5*0.35 + 0.5*0.25 + 0.5*0.20 + 0.5*0.20 = 0.5
     t = _tok(funding=0.005, ls=1.5, change=5.0,
              market_cap=5e8, volume_usd=50e6, top10=0.0)
+    expected = 0.5 * 0.35 + 0.5 * 0.25 + 0.5 * 0.20 + 0.5 * 0.20
     val = _short_opportunity_score(t)
-    # Check the 0.5 weight on dist
-    no_top10 = 0.5 * 0.20
-    with_top10_zero = 0.0 * 0.20
-    assert val > 0  # never zero when other inputs positive
-    # And it's strictly between these two
-    assert 0.0 < val < 1.0
+    assert math.isclose(val, expected, abs_tol=1e-9)
 
 
 def test_opportunity_score_dist_max_at_low_top10():
