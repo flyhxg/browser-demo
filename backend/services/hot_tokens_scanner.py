@@ -367,10 +367,17 @@ class HotTokensScanner:
                 "open_interest": t.open_interest,
                 "liquidation_price": t.liquidation_price,
                 "heat_score": t.heat_score,
-                "crowdedness_score": t.crowdedness_score,
-                "squeeze_risk": t.squeeze_risk,
+                "heat_rank": t.heat_rank,
+                # Short analysis (corrected long-side direction)
+                "long_crowdedness": t.long_crowdedness,
+                "long_squeeze_risk": t.long_squeeze_risk,
+                "extension_score": t.extension_score,
                 "short_risk_rating": t.short_risk_rating,
-                "rebound_potential": t.rebound_potential,
+                "short_grade": t.short_grade,
+                "short_opportunity_score": t.short_opportunity_score,
+                # Hot tick derivations
+                "oi_usd": t.oi_usd,
+                "funding_annualized": t.funding_annualized,
             }
             for t in tokens
         ]
