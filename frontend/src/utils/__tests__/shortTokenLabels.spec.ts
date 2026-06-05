@@ -36,21 +36,59 @@ describe('shortTokenLabels', () => {
       expect(longCrowdHintText(0.8)).toMatch(/极度拥挤/)
     })
 
-    it('returns the elevated hint when 0.4 < score <= 0.7', () => {
-      expect(longCrowdHintText(0.5)).toMatch(/偏高/)
+    it('returns the elevated hint when 0.5 < score <= 0.7', () => {
+      expect(longCrowdHintText(0.6)).toMatch(/偏高/)
     })
 
-    it('returns the balanced hint when 0.2 < score <= 0.4', () => {
-      expect(longCrowdHintText(0.3)).toMatch(/平衡/)
+    it('returns the balanced hint when 0.3 < score <= 0.5', () => {
+      expect(longCrowdHintText(0.4)).toMatch(/平衡/)
     })
 
-    it('returns the light-position hint when score <= 0.2', () => {
+    it('returns the light-position hint when score <= 0.3', () => {
       expect(longCrowdHintText(0.0)).toMatch(/较轻/)
-      expect(longCrowdHintText(0.2)).toMatch(/较轻/)
+      expect(longCrowdHintText(0.3)).toMatch(/较轻/)
     })
 
     it('falls back to the light-position hint for missing/undefined input', () => {
       expect(longCrowdHintText(undefined)).toMatch(/较轻/)
+    })
+  })
+
+  describe('class and hint thresholds agree for long_crowdedness', () => {
+    // Pairs of (class, hint) at representative boundary+1 values.
+    // A divergence between class and hint thresholds caused a real bug
+    // (score 0.45 got class 'medium' but hint '偏高' intended for >0.5).
+    // The pairs below pin the class/hint bands together: any future
+    // realignment of one without the other will be caught immediately.
+    const expected = [
+      { v: 0.71, klass: 'extreme', hint: /极度拥挤/ },
+      { v: 0.51, klass: 'high', hint: /偏高/ },
+      { v: 0.31, klass: 'medium', hint: /平衡/ },
+      { v: 0.21, klass: 'low', hint: /较轻/ },
+      { v: 0.0, klass: 'low', hint: /较轻/ },
+    ]
+    for (const { v, klass, hint } of expected) {
+      it(`at v=${v} class is "${klass}" and hint matches ${hint}`, () => {
+        expect(longCrowdClass(v)).toBe(klass)
+        expect(longCrowdHintText(v)).toMatch(hint)
+      })
+    }
+
+    it('class and hint band boundaries (0.7/0.5/0.3) agree', () => {
+      // Just above each boundary -> non-default band.
+      expect(longCrowdClass(0.71)).toBe('extreme')
+      expect(longCrowdHintText(0.71)).toMatch(/极度拥挤/)
+      expect(longCrowdClass(0.51)).toBe('high')
+      expect(longCrowdHintText(0.51)).toMatch(/偏高/)
+      expect(longCrowdClass(0.31)).toBe('medium')
+      expect(longCrowdHintText(0.31)).toMatch(/平衡/)
+      // At/below each boundary -> falls into the lower band.
+      expect(longCrowdClass(0.7)).toBe('high')
+      expect(longCrowdHintText(0.7)).toMatch(/偏高/)
+      expect(longCrowdClass(0.5)).toBe('medium')
+      expect(longCrowdHintText(0.5)).toMatch(/平衡/)
+      expect(longCrowdClass(0.3)).toBe('low')
+      expect(longCrowdHintText(0.3)).toMatch(/较轻/)
     })
   })
 

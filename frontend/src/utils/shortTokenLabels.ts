@@ -20,8 +20,8 @@ export function longCrowdClass(c: number | undefined): RiskClass {
 export function longCrowdHintText(c: number | undefined): string {
   const v = score(c)
   if (v > 0.7) return '多头极度拥挤,做空胜率↑'
-  if (v > 0.4) return '多头仓位偏高,关注'
-  if (v > 0.2) return '多空相对平衡'
+  if (v > 0.5) return '多头仓位偏高,关注'
+  if (v > 0.3) return '多空相对平衡'
   return '多头仓位较轻,做空需谨慎'
 }
 

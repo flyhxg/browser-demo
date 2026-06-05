@@ -244,6 +244,7 @@ import {
   extensionClass as extensionClassFn,
   extensionHintText as extensionHintTextFn,
 } from '../utils/shortTokenLabels'
+import type { TokenAnalysis } from '../types'
 
 interface HotToken {
   symbol: string
@@ -291,7 +292,7 @@ const htLoading = ref(false)
 const scannerRunning = ref(false)
 const autoTradeEnabled = ref(false)
 const selectedToken = ref<HotToken | null>(null)
-const tokenAnalysis = ref<any>(null)
+const tokenAnalysis = ref<TokenAnalysis | null>(null)
 const analysisLoading = ref(false)
 
 const shortRatingClass = computed(() => {

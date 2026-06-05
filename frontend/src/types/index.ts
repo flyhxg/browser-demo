@@ -123,6 +123,27 @@ export interface HotToken {
   recommended_leverage?: number
 }
 
+// Per-token AI analysis response (returned by /api/hot_tokens/{symbol}/analysis).
+// Shape is a superset of base token fields plus nested metrics/signals/recommendation.
+// `signals` flags are the only ones rendered in the modal template, but we declare
+// the full nested shape so consumers can read additional flags safely.
+export interface TokenAnalysis {
+  symbol: string
+  recommendation: string
+  signals: {
+    funding_extreme: boolean
+    longs_crowded: boolean
+    squeeze_alert: boolean
+    high_short_opportunity: boolean
+    [key: string]: boolean
+  }
+  metrics: {
+    funding_annualized: number
+    oi_usd: number
+    [key: string]: number
+  }
+}
+
 export interface HotTokensUpdateData {
   type: 'hot_tokens_update'
   data: HotToken[]
