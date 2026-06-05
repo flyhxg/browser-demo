@@ -172,10 +172,10 @@ async def get_holder_concentration(token: str, top_n: int = 20) -> dict[str, Any
                 return _safe_note("Token not found")
             resp.raise_for_status()
             data = resp.json()
-            holders_by_chain: dict = data.get("holders", {})
+            holders_by_chain: dict = data.get("holders") or {}
             all_holders: list[dict] = []
             for chain_holders in holders_by_chain.values():
-                all_holders.extend(chain_holders)
+                all_holders.extend(chain_holders or [])
             all_holders.sort(key=lambda h: h.get("percentage", 0) or 0, reverse=True)
             top = all_holders[:top_n]
             top_10_pct = sum(h.get("percentage", 0) or 0 for h in all_holders[:10])

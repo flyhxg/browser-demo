@@ -333,3 +333,59 @@ async def test_get_holder_concentration_http_error(monkeypatch):
     result = await arkham.get_holder_concentration("ETH")
     assert "error" in result
     assert result.get("data_source") == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_holder_concentration_gini_equal_balances(monkeypatch):
+    """Equal balances → Gini ≈ 0 (verified by _gini unit test); confirm integration passes balances correctly."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            # Four holders with identical balances → Gini should be 0
+            return {
+                "holders": {
+                    "ethereum": [
+                        {"address": "0x1", "balance": 100, "percentage": 25.0},
+                        {"address": "0x2", "balance": 100, "percentage": 25.0},
+                        {"address": "0x3", "balance": 100, "percentage": 25.0},
+                        {"address": "0x4", "balance": 100, "percentage": 25.0},
+                    ],
+                },
+            }
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_holder_concentration("ETH")
+    assert result["gini"] == 0.0
+    assert result["holder_count"] == 4
+    assert result["top_10_pct"] == 100.0  # all 4 holders fit in the slice
+
+
+@pytest.mark.asyncio
+async def test_get_holder_concentration_null_holders(monkeypatch):
+    """Tolerate Arkham returning null for a chain or for holders dict (no crash)."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"holders": {"ethereum": None, "arbitrum": []}}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_holder_concentration("ETH")
+    assert result["holder_count"] == 0
+    assert result["gini"] == 0.0
+    assert result["data_source"] == "arkham"
