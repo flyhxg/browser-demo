@@ -4,7 +4,13 @@ import re
 from typing import Any, List
 from services.datasources.binance_futures import get_24h_ticker, get_funding_rate, get_open_interest, get_long_short_ratio, get_liquidations
 from services.datasources.technical import get_klines, calculate_rsi, calculate_support_resistance
-from services.datasources.arkham import get_exchange_netflow, get_whale_movements
+from services.datasources.arkham import (
+    get_exchange_netflow,
+    get_whale_movements,
+    get_holder_concentration,
+    get_smart_money_flow,
+    get_exchange_reserves,
+)
 from services.datasources.whale_alert import get_large_transactions
 from services.datasources.coingecko import get_coin_details
 from services.llm_factory import ProviderNotConfiguredError, create_llm
@@ -21,6 +27,9 @@ class ShortSellingEngine:
         self.dimension_map = {
             "derivatives": self._fetch_derivatives,
             "onchain": self._fetch_onchain,
+            "holder_concentration": self._fetch_holder_concentration,
+            "smart_money": self._fetch_smart_money,
+            "exchange_reserves": self._fetch_exchange_reserves,
             "unlock": self._fetch_unlock,
             "technical": self._fetch_technical,
             "sentiment": self._fetch_sentiment,
@@ -84,10 +93,23 @@ class ShortSellingEngine:
     async def _fetch_onchain(self, symbol: str) -> dict:
         tasks = [get_exchange_netflow(symbol), get_whale_movements(symbol)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        netflow = results[0] if not isinstance(results[0], Exception) else {}
+        whales = results[1] if not isinstance(results[1], Exception) else {}
         return {
-            "exchange_netflow_24h": results[0].get("exchange_netflow_24h") if not isinstance(results[0], Exception) else None,
-            "whale_movements": results[1].get("whale_movements") if not isinstance(results[1], Exception) else [],
+            "cex_netflow_24h": netflow.get("cex_netflow_24h"),
+            "cex_inflow_24h": netflow.get("cex_inflow_24h"),
+            "cex_outflow_24h": netflow.get("cex_outflow_24h"),
+            "whale_movements": whales.get("whale_movements", []),
         }
+
+    async def _fetch_holder_concentration(self, symbol: str) -> dict:
+        return await get_holder_concentration(symbol)
+
+    async def _fetch_smart_money(self, symbol: str) -> dict:
+        return await get_smart_money_flow(symbol)
+
+    async def _fetch_exchange_reserves(self, symbol: str) -> dict:
+        return await get_exchange_reserves(symbol)
 
     async def _fetch_unlock(self, symbol: str) -> dict:
         try:
