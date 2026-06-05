@@ -43,12 +43,16 @@ def init_db() -> None:
     sig_cols = {row[1] for row in cursor.fetchall()}
     if "source_type" not in sig_cols:
         cursor.execute("ALTER TABLE signals ADD COLUMN source_type TEXT DEFAULT 'live'")
-        # Backfill known mock authors
-        cursor.execute(
-            "UPDATE signals SET source_type = 'mock' "
-            "WHERE author IN ('TraderOne', 'CryptoWhale', 'BearHunter') "
-            "AND source_type IS NULL"
-        )
+    # Backfill known mock authors. SQLite's ALTER TABLE ADD COLUMN with a
+    # DEFAULT populates existing rows with the default value ('live'), not
+    # NULL, so the guard must also accept the 'live' default. The OR 'live'
+    # is intentionally narrow: future sources that mark rows as 'paper' or
+    # 'experimental' will not be re-classified by this backfill.
+    cursor.execute(
+        "UPDATE signals SET source_type = 'mock' "
+        "WHERE author IN ('TraderOne', 'CryptoWhale', 'BearHunter') "
+        "AND (source_type IS NULL OR source_type = 'live')"
+    )
 
     # Dedup existing rows by source_url before adding the unique index.
     # Pre-existing mock data may have repeated (source_url) values that
