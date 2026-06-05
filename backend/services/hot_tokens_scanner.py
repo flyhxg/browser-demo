@@ -182,7 +182,7 @@ class HotTokensScanner:
             liquidation_price = self._calculate_liquidation_price(price)
 
             oi_usd = open_interest * price
-            funding_annualized = funding_rate * 3 * 365
+            funding_annualized = funding_rate * 100 * 3 * 365
 
             hot = HotToken(
                 symbol=binance_symbol,
