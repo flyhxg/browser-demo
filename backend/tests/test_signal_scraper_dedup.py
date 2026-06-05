@@ -65,6 +65,35 @@ def test_save_to_db_sets_source_type_live():
     assert row["source_type"] == "live"
 
 
+def test_save_to_db_writes_post_created_at():
+    """save_to_db must persist the post's own created_at (ISO string
+    from binance_square_browser._parse_html) into the signals.created_at
+    column so the UI can render relative time ("5m ago") rather than
+    the DB row insert time. Regression test for the B1 follow-up."""
+    init_db()
+    scraper = BinanceSquareScraper()
+    post = {
+        "source": "binance_square",
+        "source_url": _url_for("relative time test $BTC"),
+        "author": "TimeAuthor",
+        "content": "relative time test $BTC",
+        "likes": 0,
+        "comments": 0,
+        "raw_data": "{}",
+        "created_at": "2026-06-05T10:00:00",
+    }
+    scraper.save_to_db([post])
+
+    conn = get_db()
+    row = conn.execute(
+        "SELECT created_at FROM signals WHERE source_url = ?", (post["source_url"],)
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row["created_at"] == "2026-06-05T10:00:00"
+
+
 # --- Integration: scrape() → save_to_db() end-to-end ---
 
 

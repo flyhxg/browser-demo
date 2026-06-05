@@ -43,6 +43,17 @@ def init_db() -> None:
     sig_cols = {row[1] for row in cursor.fetchall()}
     if "source_type" not in sig_cols:
         cursor.execute("ALTER TABLE signals ADD COLUMN source_type TEXT DEFAULT 'live'")
+
+    # Migration: add created_at column (idempotent). The existing
+    # `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` column on the CREATE
+    # TABLE statement shadows this — but for pre-existing tables built
+    # before that line was added, this ALTER fills in the gap. The column
+    # is intentionally named to match what the BinanceSquareScraper now
+    # writes: the post's own creation time, not the DB row insert time.
+    # DEFAULT '' keeps the UI fallback path working for legacy rows where
+    # we never had a real post time.
+    if "created_at" not in sig_cols:
+        cursor.execute("ALTER TABLE signals ADD COLUMN created_at TEXT DEFAULT ''")
     # Backfill known mock authors. SQLite's ALTER TABLE ADD COLUMN with a
     # DEFAULT populates existing rows with the default value ('live'), not
     # NULL, so the guard must also accept the 'live' default. The OR 'live'

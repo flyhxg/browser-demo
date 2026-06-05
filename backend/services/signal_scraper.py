@@ -92,6 +92,10 @@ class BinanceSquareScraper:
         Uses INSERT OR IGNORE so re-running with the same posts (same
         source_url) is a no-op — the UNIQUE partial index on source_url
         (created in init_db) is the source of truth for dedup.
+
+        Writes the post's own `created_at` (ISO string from
+        binance_square_browser) into the dedicated column so the UI can
+        show relative time ("5m ago") instead of the DB insert time.
         """
         conn = get_db()
         cursor = conn.cursor()
@@ -100,8 +104,8 @@ class BinanceSquareScraper:
             cursor.execute(
                 """
                 INSERT OR IGNORE INTO signals
-                    (source, source_url, author, content, likes, comments, raw_data, status, source_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'live')
+                    (source, source_url, author, content, likes, comments, raw_data, status, source_type, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'live', ?)
                 """,
                 (
                     post.get("source", "binance_square"),
@@ -111,6 +115,7 @@ class BinanceSquareScraper:
                     post.get("likes", 0),
                     post.get("comments", 0),
                     post.get("raw_data", str(post)),
+                    post.get("created_at", ""),
                 ),
             )
             if cursor.rowcount > 0:
