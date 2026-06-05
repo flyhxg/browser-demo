@@ -17,6 +17,7 @@ export interface AppConfig {
   sl_percentage: number
   min_confidence: number
   scan_interval_minutes: number
+  arkham_api_key_masked: string
 }
 
 export interface StepData {

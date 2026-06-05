@@ -98,17 +98,6 @@
         </div>
       </div>
       <div class="form-row">
-        <label>Testnet</label>
-        <div class="radio-group">
-          <label class="radio" :class="{ active: binanceTestnet }">
-            <input type="radio" v-model="binanceTestnet" :value="true" /> Yes
-          </label>
-          <label class="radio" :class="{ active: !binanceTestnet }">
-            <input type="radio" v-model="binanceTestnet" :value="false" /> No
-          </label>
-        </div>
-      </div>
-      <div class="form-row">
         <label>Max Position</label>
         <input v-model="maxPositionSize" type="number" placeholder="100" />
       </div>
@@ -145,6 +134,26 @@
         <span v-if="tradingSaveResult === false" class="valid-text err">Save failed</span>
       </div>
     </section>
+
+    <section class="card" style="margin-top: 20px;">
+      <h3>On-chain / Arkham Configuration</h3>
+      <p class="desc">
+        Configure Arkham Intelligence API for on-chain analytics: token holder
+        concentration, smart money flow, exchange reserves, whale movements, and
+        entity predictions.
+      </p>
+      <div class="form-row">
+        <label>API Key</label>
+        <input v-model="arkhamApiKey" type="password" placeholder="Arkham API key (arkm-…)" />
+        <span v-if="config?.arkham_api_key_masked" class="badge ok">OK</span>
+        <span v-else class="badge no">--</span>
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary" @click="saveArkham">Save</button>
+        <span v-if="arkhamSaveResult === true" class="valid-text ok">Saved</span>
+        <span v-if="arkhamSaveResult === false" class="valid-text err">Save failed</span>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -167,7 +176,6 @@ const browserSaveResult = ref<boolean | null>(null)
 const binanceApiKey = ref('')
 const binanceSecretKey = ref('')
 const binanceMode = ref<'futures' | 'spot'>('futures')
-const binanceTestnet = ref(true)
 const tradingEnabled = ref(false)
 const maxPositionSize = ref(100)
 const tpPercentage = ref(5.0)
@@ -175,6 +183,9 @@ const slPercentage = ref(3.0)
 const minConfidence = ref(0.7)
 const scanInterval = ref(5)
 const tradingSaveResult = ref<boolean | null>(null)
+
+const arkhamApiKey = ref('')
+const arkhamSaveResult = ref<boolean | null>(null)
 
 const placeholder = computed(() => config.value?.configured ? config.value.api_key_masked : 'sk-...')
 const browserKeyPlaceholder = computed(() => config.value?.browser_use_api_key_masked || 'browser-use-api-key')
@@ -193,7 +204,6 @@ async function loadConfig() {
     protocol.value = config.value?.protocol || 'anthropic'
     browserMode.value = config.value?.browser_mode || 'local'
     binanceMode.value = config.value?.binance_mode || 'futures'
-    binanceTestnet.value = config.value?.binance_testnet !== false
     tradingEnabled.value = config.value?.trading_enabled || false
     maxPositionSize.value = config.value?.max_position_size_usd || 100
     tpPercentage.value = config.value?.tp_percentage || 5.0
@@ -276,7 +286,6 @@ async function saveBrowser() {
 async function saveTrading() {
   const data: Record<string, any> = {
     binance_mode: binanceMode.value,
-    binance_testnet: binanceTestnet.value,
     trading_enabled: tradingEnabled.value,
     max_position_size_usd: maxPositionSize.value,
     tp_percentage: tpPercentage.value,
@@ -309,6 +318,32 @@ async function saveTrading() {
   } catch {
     tradingSaveResult.value = false
     setTimeout(() => { tradingSaveResult.value = null }, 2000)
+  }
+}
+
+async function saveArkham() {
+  const data: Record<string, string> = {}
+  if (arkhamApiKey.value) {
+    data.arkham_api_key = arkhamApiKey.value
+  }
+  try {
+    const resp = await fetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (resp.ok) {
+      arkhamApiKey.value = ''
+      await loadConfig()
+      arkhamSaveResult.value = true
+      setTimeout(() => { arkhamSaveResult.value = null }, 2000)
+    } else {
+      arkhamSaveResult.value = false
+      setTimeout(() => { arkhamSaveResult.value = null }, 2000)
+    }
+  } catch {
+    arkhamSaveResult.value = false
+    setTimeout(() => { arkhamSaveResult.value = null }, 2000)
   }
 }
 
