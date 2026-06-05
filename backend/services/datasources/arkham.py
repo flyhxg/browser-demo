@@ -318,3 +318,43 @@ async def get_exchange_reserves(token: str) -> dict[str, Any]:
         "exchange_count": len(by_exchange),
         "data_source": "arkham",
     }
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def get_entity_predictions(entity: str) -> dict[str, Any]:
+    """ML-predicted addresses for an entity (e.g. 'binance', 'coinbase').
+
+    Endpoint: GET /intelligence/entity_predictions/{entity}
+    Returns: {"predictions": [...], "entity": str, "data_source": "arkham"}
+    """
+    # No-key branch keeps bare-dict shape: spec test asserts exact dict equality.
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    url = f"{ARKHAM_API}/intelligence/entity_predictions/{entity}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=_auth_headers())
+            if resp.status_code == 401:
+                return _safe_note("Invalid API key")
+            if resp.status_code == 404:
+                return _safe_note("Entity not found or no predictions")
+            resp.raise_for_status()
+            data = resp.json() or []
+            if not isinstance(data, list):
+                return _safe_note("unexpected response shape")
+            return {
+                "predictions": [
+                    {
+                        "address": p.get("address"),
+                        "entity_id": p.get("entityID"),
+                        "usd_balance": p.get("usdBalance"),
+                    }
+                    for p in data
+                ],
+                "entity": entity,
+                "data_source": "arkham",
+            }
+    except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+        # Module contract: never raise. Return shape-consistent error dict.
+        return _safe_note(f"network error: {exc}")

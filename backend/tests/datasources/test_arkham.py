@@ -553,3 +553,88 @@ async def test_get_exchange_reserves_filters_by_token(monkeypatch):
     result = await arkham.get_exchange_reserves("ETH")
     # 8 exchanges, each contributing 100 USD of ETH (USDC is filtered out)
     assert result["exchange_reserves_usd"] == 800.0
+
+
+@pytest.mark.asyncio
+async def test_get_entity_predictions_no_key(monkeypatch):
+    from services.datasources import arkham
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "")
+    result = await arkham.get_entity_predictions("binance")
+    assert result == {"error": "ARKHAM_API_KEY not configured"}
+
+
+@pytest.mark.asyncio
+async def test_get_entity_predictions_happy_path(monkeypatch):
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return [
+                {"address": "0xaaaa", "entityID": "binance", "usdBalance": 1_000_000.0},
+                {"address": "0xbbbb", "entityID": "binance", "usdBalance": 500_000.0},
+            ]
+        def raise_for_status(self): return None  # T4-T8 pattern
+
+    async def fake_get(self, url, params=None, **kwargs):  # self per T4-T8
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_entity_predictions("binance")
+
+    assert len(result["predictions"]) == 2
+    assert result["predictions"][0]["address"] == "0xaaaa"
+    assert result["predictions"][1]["address"] == "0xbbbb"
+    assert result["predictions"][1]["usd_balance"] == 500_000.0
+    assert result["predictions"][0]["entity_id"] == "binance"
+    assert result["entity"] == "binance"
+    assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_entity_predictions_http_error(monkeypatch):
+    """Module contract: never raise. On 5xx, return an error dict, don't propagate."""
+    from services.datasources import arkham
+    import httpx, tenacity
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 500
+        def json(self): return {}
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("500", request=None, response=None)
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    arkham.get_entity_predictions.retry.stop = tenacity.stop_after_attempt(1)
+    arkham.get_entity_predictions.retry.wait = tenacity.wait_fixed(0)
+
+    result = await arkham.get_entity_predictions("binance")
+    assert "error" in result
+    assert result.get("data_source") == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_entity_predictions_unexpected_shape(monkeypatch):
+    """Arkham returns an unexpected dict instead of list → graceful error."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self): return {"unexpected": "shape"}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_entity_predictions("binance")
+    assert "error" in result
+    assert result.get("data_source") == "arkham"
