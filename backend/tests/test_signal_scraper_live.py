@@ -26,12 +26,11 @@ class _StubBrowser(BinanceSquareBrowser):
 
 @pytest.fixture
 def stub_browser(monkeypatch):
-    holder = {}
-
+    """Return a setter that installs a stubbed browser singleton for the test."""
     def _set(posts=None, exc=None):
-        holder["b"] = _StubBrowser(posts=posts, exc=exc)
-        monkeypatch.setattr(browser_module, "_browser", holder["b"])
-        return holder["b"]
+        b = _StubBrowser(posts=posts, exc=exc)
+        monkeypatch.setattr(browser_module, "_browser", b)
+        return b
 
     return _set
 
