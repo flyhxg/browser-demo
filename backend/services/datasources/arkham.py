@@ -149,6 +149,50 @@ async def get_exchange_netflow(token: str) -> dict[str, Any]:
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def get_holder_concentration(token: str, top_n: int = 20) -> dict[str, Any]:
+    """Holder concentration analysis (top-N % + Gini coefficient).
+
+    Endpoint: GET /token/holders/{cg_id}?groupByEntity=true
+    Returns: {"top_10_pct": float, "top_n_pct": float, "gini": float,
+              "holder_count": int, "data_source": "arkham"}
+    """
+    # No-key branch keeps bare-dict shape: spec test asserts exact dict equality.
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    cg_id = _symbol_to_cg_id(token)
+    url = f"{ARKHAM_API}/token/holders/{cg_id}"
+    params = {"groupByEntity": "true"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=_auth_headers(), params=params)
+            if resp.status_code == 401:
+                return _safe_note("Invalid API key")
+            if resp.status_code == 404:
+                return _safe_note("Token not found")
+            resp.raise_for_status()
+            data = resp.json()
+            holders_by_chain: dict = data.get("holders", {})
+            all_holders: list[dict] = []
+            for chain_holders in holders_by_chain.values():
+                all_holders.extend(chain_holders)
+            all_holders.sort(key=lambda h: h.get("percentage", 0) or 0, reverse=True)
+            top = all_holders[:top_n]
+            top_10_pct = sum(h.get("percentage", 0) or 0 for h in all_holders[:10])
+            balances = [h.get("balance", 0) or 0 for h in all_holders]
+            return {
+                "top_10_pct": round(top_10_pct, 2),
+                "top_n_pct": round(sum(h.get("percentage", 0) or 0 for h in top), 2),
+                "gini": round(_gini(balances), 4),
+                "holder_count": len(all_holders),
+                "data_source": "arkham",
+            }
+    except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+        # Module contract: never raise. Return shape-consistent error dict.
+        return _safe_note(f"network error: {exc}")
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def get_whale_movements(token: str, min_value_usd: float = 1_000_000.0) -> dict[str, Any]:
     """Top high-value transfers for a token in the last 24h.
 

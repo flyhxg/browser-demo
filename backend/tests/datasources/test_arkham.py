@@ -255,3 +255,81 @@ async def test_get_whale_movements_primary_field_names(monkeypatch):
     assert m["amount_usd"] == 750_000.0
     assert m["blockchain"] == "polygon"
     assert m["timestamp"] == "2026-06-05T01:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_get_holder_concentration_no_key(monkeypatch):
+    from services.datasources import arkham
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "")
+    result = await arkham.get_holder_concentration("ETH")
+    assert result == {"error": "ARKHAM_API_KEY not configured"}
+
+
+@pytest.mark.asyncio
+async def test_get_holder_concentration_happy_path(monkeypatch):
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {
+                "token": {"symbol": "eth"},
+                "holders": {
+                    "ethereum": [
+                        {"address": "0xa", "balance": 1000, "percentage": 40.0},
+                        {"address": "0xb", "balance": 500, "percentage": 20.0},
+                        {"address": "0xc", "balance": 100, "percentage": 5.0},
+                    ],
+                    "arbitrum": [
+                        {"address": "0xd", "balance": 200, "percentage": 10.0},
+                    ],
+                },
+            }
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_holder_concentration("ETH", top_n=10)
+    assert result["holder_count"] == 4
+    # 40 + 20 + 5 + 10 = 75; top_n=10 covers all 4 holders, so top_10 == top_n
+    assert abs(result["top_10_pct"] - 75.0) < 0.01
+    assert result["top_n_pct"] == 75.0
+    assert 0.0 < result["gini"] <= 1.0
+    assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_holder_concentration_http_error(monkeypatch):
+    """Module contract: never raise. On 5xx, return an error dict, don't propagate."""
+    from services.datasources import arkham
+    import httpx
+    import tenacity
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 500
+        def json(self):
+            return {}
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(
+                "500 Server Error", request=None, response=None
+            )
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+
+    # Bypass tenacity backoff for speed: stop after 1 attempt, no wait.
+    arkham.get_holder_concentration.retry.stop = tenacity.stop_after_attempt(1)
+    arkham.get_holder_concentration.retry.wait = tenacity.wait_fixed(0)
+
+    result = await arkham.get_holder_concentration("ETH")
+    assert "error" in result
+    assert result.get("data_source") == "arkham"
