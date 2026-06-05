@@ -8,6 +8,7 @@ from services.hot_tokens_scanner import (
     _long_crowdedness,
     _extension_score,
     _short_opportunity_score,
+    _calculate_short_grade,
 )
 
 
@@ -127,3 +128,67 @@ def test_opportunity_score_top10_above_70_yields_zero_dist():
              market_cap=0.0, volume_usd=0.0, top10=80.0)
     # Only dist contributes, and it's 0
     assert _short_opportunity_score(t) == 0.0
+
+
+# --- _calculate_short_grade ---
+
+
+def test_short_grade_s_top_tier():
+    # All four S-conditions satisfied
+    t = _tok(funding=0.012, ls=2.0, change=8.0,
+             market_cap=2e9, volume_usd=200e6, top10=50.0)
+    assert _calculate_short_grade(t) == "S"
+
+
+def test_short_grade_a_no_top10_known():
+    # A requires crowd+ext+market_cap but NOT top10
+    t = _tok(funding=0.008, ls=1.8, change=6.0,
+             market_cap=2e9, volume_usd=200e6, top10=0.0)
+    assert _calculate_short_grade(t) == "A"
+
+
+def test_short_grade_b_either_signal_at_threshold():
+    # crowd ≥ 0.3 is enough
+    t = _tok(funding=0.005, ls=1.4, change=1.0,
+             market_cap=2e8, volume_usd=50e6, top10=80.0)
+    assert _calculate_short_grade(t) == "B"
+
+
+def test_short_grade_b_extension_only():
+    # ext ≥ 0.3, crowd below — still B if market_cap ≥ 100M
+    t = _tok(funding=0.0, ls=1.0, change=4.0,
+             market_cap=2e8, volume_usd=50e6, top10=80.0)
+    assert _calculate_short_grade(t) == "B"
+
+
+def test_short_grade_c_liquid_below_threshold():
+    # market_cap ≥ 100M and volume ≥ 10M but neither signal high enough
+    t = _tok(funding=0.0, ls=1.0, change=0.0,
+             market_cap=2e8, volume_usd=20e6, top10=80.0)
+    assert _calculate_short_grade(t) == "C"
+
+
+def test_short_grade_d_low_market_cap():
+    t = _tok(funding=0.0, ls=1.0, change=0.0,
+             market_cap=50e6, volume_usd=50e6, top10=80.0)
+    assert _calculate_short_grade(t) == "D"
+
+
+def test_short_grade_d_low_volume():
+    t = _tok(funding=0.0, ls=1.0, change=0.0,
+             market_cap=2e8, volume_usd=5e6, top10=80.0)
+    assert _calculate_short_grade(t) == "D"
+
+
+def test_short_grade_s_demits_to_a_when_top10_unknown():
+    # Even if crowd/ext/market_cap all S-grade, missing top10 prevents S
+    t = _tok(funding=0.012, ls=2.0, change=8.0,
+             market_cap=2e9, volume_usd=200e6, top10=0.0)
+    assert _calculate_short_grade(t) == "A"
+
+
+def test_short_grade_s_demits_when_top10_too_concentrated():
+    # top10 > 70% disqualifies S
+    t = _tok(funding=0.012, ls=2.0, change=8.0,
+             market_cap=2e9, volume_usd=200e6, top10=80.0)
+    assert _calculate_short_grade(t) == "A"

@@ -523,3 +523,40 @@ def _short_opportunity_score(token: "HotToken") -> float:
         dist = max(min((70.0 - token.top10_holders_pct) / 40.0, 1.0), 0.0)
 
     return crowd * 0.35 + ext * 0.25 + liq * 0.20 + dist * 0.20
+
+
+def _calculate_short_grade(token: "HotToken") -> str:
+    """Map a token to S/A/B/C/D per spec §4.3.
+
+    The first matching row wins. Unfilled fields (=0) downgrade by failing
+    the row that requires them.
+    """
+    crowd = _long_crowdedness(token)
+    ext = _extension_score(token)
+    mc = token.market_cap
+    vol = token.volume_usd
+    top10 = token.top10_holders_pct
+
+    # S: top-tier. Requires top10 known AND ≤ 70.
+    if (
+        crowd >= 0.7
+        and ext >= 0.6
+        and mc >= 1e9
+        and 0 < top10 <= 70
+    ):
+        return "S"
+
+    # A: solid. No top10 requirement, but big-cap + high signals.
+    if crowd >= 0.5 and ext >= 0.4 and mc >= 1e9:
+        return "A"
+
+    # B: either signal above 0.3 AND big enough to trade.
+    if (crowd >= 0.3 or ext >= 0.3) and mc >= 100e6:
+        return "B"
+
+    # C: liquid but no real signal.
+    if mc >= 100e6 and vol >= 10e6:
+        return "C"
+
+    # D: not tradeable.
+    return "D"
