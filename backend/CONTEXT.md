@@ -32,11 +32,11 @@ Backend 是基于 FastAPI 构建的 Python 服务层，负责意图分析、工�
 
 ### 信号与分析
 
-- **services/signal_scraper.py** — 信号抓取
-- **services/signal_analyzer.py** — 信号分析（LLM）
+- **services/signal_scraper.py** — Binance Square 帖子抓取（保存为 `posts` 表；历史表名 signals 保留兼容）
+- **services/signal_analyzer.py** — LLM 分析服务：输入 Post，输出 Opportunity 候选
 - **services/hot_tokens_scanner.py** — 热门代币扫描
-- **services/square_scraper.py** — Binance Square 帖子抓取
-- **services/filter_engine.py** — 信号过滤引擎
+- **services/square_scraper.py** — Binance Square 帖子抓取（API 拦截实现）
+- **services/filter_engine.py** — Opportunity 过滤引擎（cg/okx/hyperliquid 数据校验）
 
 ### 交易引擎
 
