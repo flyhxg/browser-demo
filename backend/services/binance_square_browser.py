@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from bs4 import BeautifulSoup
 
+from services.config_store import get_binance_square_scrape_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,12 +81,58 @@ class BinanceSquareBrowser:
         self._last_fetch_at: Optional[float] = None
 
     async def fetch_posts(self, limit: int) -> list[dict[str, Any]]:
-        """Fetch up to `limit` posts from Binance Square. Returns raw post dicts.
+        """Fetch up to `limit` posts from Binance Square.
 
-        Raises LoginWallError / CaptchaError / RateLimitError / ParseError
-        for the caller to handle.
+        Uses the injected page if `__init__` received one (tests), otherwise
+        lazy-launches a real chromium, navigates to the Square URL, scrolls,
+        and reads the rendered HTML.
         """
-        raise NotImplementedError
+        cfg = get_binance_square_scrape_config()
+        page = self._injected_page
+
+        if page is None:
+            page = await self._get_or_launch_page(cfg)
+
+        # If page has been idle too long, force a fresh navigation
+        if (
+            self._last_fetch_at is not None
+            and (time.time() - self._last_fetch_at) > self.IDLE_RELOAD_SECONDS
+        ):
+            try:
+                await page.goto(cfg["url"], wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                raise RateLimitError(f"goto failed (idle reload): {e}")
+
+        html = await page.content()
+        self._last_fetch_at = time.time()
+        return self._parse_html(html, limit)
+
+    async def _get_or_launch_page(self, cfg: dict[str, Any]):
+        """Lazy-launch a chromium and return a configured page. Test-only shortcut: tests inject a page in __init__."""
+        from playwright.async_api import async_playwright
+
+        if self._browser is not None and getattr(self._browser, "is_connected", lambda: True)():
+            return await self._browser.new_page()  # type: ignore[attr-defined]
+
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
+            headless=cfg.get("headless", True),
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        ctx = await self._browser.new_context(
+            user_agent=cfg["user_agent"],
+            viewport={"width": 1920, "height": 1080},
+        )
+        await ctx.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => false })"
+        )
+        page = await ctx.new_page()
+        await page.goto(cfg["url"], wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(5000)
+        for _ in range(int(cfg.get("scroll_passes", 2))):
+            await page.mouse.wheel(0, 1200)
+            await page.wait_for_timeout(int(cfg.get("scroll_pause_ms", 2500)))
+        return page
 
     def _parse_html(self, html: str, limit: int) -> list[dict[str, Any]]:
         """Parse Binance Square HTML into raw post dicts.

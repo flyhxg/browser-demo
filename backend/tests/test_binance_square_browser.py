@@ -108,3 +108,52 @@ def test_extract_tokens_handles_lowercase_as_no_match():
     """Lowercase symbols are NOT token mentions per the spec regex."""
     assert _extract_tokens("btc to the moon") == []
     assert _extract_tokens("$btc") == []
+
+
+# --- fetch_posts with injected page (Task 6) ---
+
+
+class FakePage:
+    """Stand-in for playwright Page. Returns the same HTML for every .content() call."""
+
+    def __init__(self, html: str):
+        self._html = html
+        self.content_calls = 0
+
+    async def content(self) -> str:
+        self.content_calls += 1
+        return self._html
+
+    async def goto(self, *args, **kwargs):
+        pass
+
+    async def mouse_wheel(self, *args, **kwargs):
+        pass
+
+    async def wait_for_timeout(self, *args, **kwargs):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_fetch_posts_uses_injected_page_without_launching_browser():
+    """When constructed with page=, fetch_posts must NOT touch _browser / _playwright."""
+    html = _load_fixture("home_with_posts.html")
+    page = FakePage(html)
+    browser = BinanceSquareBrowser(page=page)
+
+    posts = await browser.fetch_posts(limit=5)
+
+    assert isinstance(posts, list)
+    assert len(posts) > 0
+    assert page.content_calls >= 1
+    assert browser._browser is None
+    assert browser._playwright is None
+    assert browser._last_fetch_at is not None
+
+
+@pytest.mark.asyncio
+async def test_fetch_posts_propagates_login_wall_from_injected_page():
+    html = _load_fixture("synthetic_login_wall.html")
+    browser = BinanceSquareBrowser(page=FakePage(html))
+    with pytest.raises(LoginWallError):
+        await browser.fetch_posts(limit=5)
