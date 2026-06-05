@@ -389,3 +389,97 @@ async def test_get_holder_concentration_null_holders(monkeypatch):
     assert result["holder_count"] == 0
     assert result["gini"] == 0.0
     assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_smart_money_flow_aggregates(monkeypatch):
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    entity_data = {
+        "jump-trading": {"inflow": 100.0, "outflow": 200.0},
+        "wintermute": {"inflow": 50.0, "outflow": 30.0},
+        "cumberland": {"inflow": 0.0, "outflow": 0.0},
+    }
+
+    class FakeResp:
+        def __init__(self, entity):
+            self.status_code = 200 if entity in entity_data else 404
+            self._entity = entity
+        def json(self):
+            d = entity_data[self._entity]
+            return {"ethereum": [{
+                "time": "2026-06-04T00:00:00Z",
+                "inflow": d["inflow"], "outflow": d["outflow"],
+            }]}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        entity = url.split("/")[-1]
+        return FakeResp(entity)
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_smart_money_flow("ETH", days=7)
+    assert abs(result["smart_money_netflow"] - (-80.0)) < 0.01
+    assert "jump-trading" in result["by_entity"]
+    assert result["by_entity"]["jump-trading"] == -100.0
+    assert result["data_source"] == "arkham"
+
+
+@pytest.mark.asyncio
+async def test_get_smart_money_flow_no_key(monkeypatch):
+    from services.datasources import arkham
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "")
+    result = await arkham.get_smart_money_flow("ETH")
+    assert result == {"error": "ARKHAM_API_KEY not configured"}
+
+
+@pytest.mark.asyncio
+async def test_get_smart_money_flow_skips_404_entities(monkeypatch):
+    """Entities returning 404 should contribute 0.0 to the aggregate, not crash."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        def __init__(self, entity):
+            # Only jump-trading returns 200; the rest 404
+            if entity == "jump-trading":
+                self.status_code = 200
+            else:
+                self.status_code = 404
+            self._entity = entity
+        def json(self):
+            return {"ethereum": [{"inflow": 500.0, "outflow": 100.0}]}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        entity = url.split("/")[-1]
+        return FakeResp(entity)
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_smart_money_flow("ETH")
+    assert result["smart_money_netflow"] == 400.0  # only jump-trading contributed
+    assert result["by_entity"]["wintermute"] == 0.0  # 404 → 0
+
+
+@pytest.mark.asyncio
+async def test_get_smart_money_flow_handles_empty_chain(monkeypatch):
+    """If Arkham returns empty array for ethereum, entity contributes 0."""
+    from services.datasources import arkham
+
+    monkeypatch.setattr(arkham, "_get_api_key", lambda: "fake-key")
+
+    class FakeResp:
+        status_code = 200
+        def json(self): return {"ethereum": []}
+        def raise_for_status(self): return None
+
+    async def fake_get(self, url, params=None, **kwargs):
+        return FakeResp()
+
+    monkeypatch.setattr(arkham.httpx.AsyncClient, "get", fake_get)
+    result = await arkham.get_smart_money_flow("ETH")
+    assert result["smart_money_netflow"] == 0.0
+    assert all(v == 0.0 for v in result["by_entity"].values())

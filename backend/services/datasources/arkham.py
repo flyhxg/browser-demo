@@ -243,3 +243,39 @@ async def get_whale_movements(token: str, min_value_usd: float = 1_000_000.0) ->
     except (httpx.HTTPError, asyncio.TimeoutError) as exc:
         # Module contract: never raise. Return shape-consistent error dict.
         return _safe_note(f"network error: {exc}")
+
+
+async def get_smart_money_flow(token: str, days: int = 7) -> dict[str, Any]:
+    """Sum of USD netflow across known smart-money entities, Ethereum chain.
+
+    Endpoint: GET /flow/entity/{entity} (one call per known entity, in parallel)
+    """
+    if not _get_api_key():
+        return {"error": "ARKHAM_API_KEY not configured"}
+
+    async def fetch_one(entity: str) -> tuple[str, float]:
+        try:
+            url = f"{ARKHAM_API}/flow/entity/{entity}"
+            resp = await _get_json(url, params={"chains": "ethereum"})
+            if resp is None or resp.status_code != 200:
+                return entity, 0.0
+            data = resp.json()
+            chain_data = data.get("ethereum", [])
+            if not chain_data:
+                return entity, 0.0
+            latest = chain_data[-1]
+            net = float(latest.get("inflow", 0) or 0) - float(latest.get("outflow", 0) or 0)
+            return entity, net
+        except Exception as exc:
+            logger.warning(f"smart-money fetch failed for {entity}: {exc}")
+            return entity, 0.0
+
+    results = await asyncio.gather(*(fetch_one(e) for e in SMART_MONEY_ENTITIES))
+    by_entity = dict(results)
+    total = sum(by_entity.values())
+    return {
+        "smart_money_netflow": round(total, 2),
+        "by_entity": {k: round(v, 2) for k, v in by_entity.items()},
+        "entity_count": len(by_entity),
+        "data_source": "arkham",
+    }
