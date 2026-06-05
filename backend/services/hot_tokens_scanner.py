@@ -291,47 +291,25 @@ class HotTokensScanner:
             self._calculate_short_metrics(token)
 
     def _calculate_short_metrics(self, token: HotToken) -> None:
-        """Calculate short-selling risk metrics for a token."""
-        # Funding rate: negative = shorts pay longs (crowded short)
-        # Normalize: typical range -0.01 to +0.01 per 8h
-        funding_normalized = max(min(-token.funding_rate / 0.01, 1.0), -1.0)
+        """Populate long-side crowdedness, extension, grade, and composite score.
 
-        # Long/Short ratio: lower = more shorts
-        # Normalize: 0.5 = balanced, <0.5 = short-heavy
-        if token.long_short_ratio > 0:
-            ls_normalized = max(min(1.0 - token.long_short_ratio, 1.0), 0.0)
-        else:
-            ls_normalized = 0.0
+        Reads only fields already on the tick (funding_rate, long_short_ratio,
+        price_change_24h, volume_usd, plus cached market_cap / top10 from
+        FundamentalsCache).
+        """
+        token.long_crowdedness = _long_crowdedness(token)
+        token.extension_score = _extension_score(token)
 
-        # Price drop: larger drop = higher rebound potential
-        # Normalize: 20% drop = max score
-        drop_normalized = max(min(abs(token.price_change_24h) / 20.0, 1.0), 0.0) if token.price_change_24h < 0 else 0.0
-
-        # Volume confirmation: high volume on drop = more genuine
-        # Already captured in volume_score above
-
-        # Crowdedness score: weighted average of funding and LS ratio
-        # Funding is more direct signal of short crowding
-        token.crowdedness_score = (
-            funding_normalized * 0.6 +
-            ls_normalized * 0.4
+        # Long squeeze risk: high crowd + extended price (longs about to be squeezed)
+        token.long_squeeze_risk = min(
+            token.long_crowdedness * 0.6 + token.extension_score * 0.4, 1.0
         )
 
-        # Short squeeze risk: high crowdedness + high price drop + high volume
-        token.squeeze_risk = (
-            token.crowdedness_score * 0.5 +
-            drop_normalized * 0.3 +
-            min(token.volume_usd / (max_volume := max(t.volume_usd for t in self._hot_tokens.values()) if self._hot_tokens else 1, 1.0)) * 0.2
-            if self._hot_tokens else token.crowdedness_score * 0.5 + drop_normalized * 0.3
-        )
-        # Fix: simplify squeeze_risk calculation
-        token.squeeze_risk = min(token.crowdedness_score * 0.6 + drop_normalized * 0.4, 1.0)
+        token.short_opportunity_score = _short_opportunity_score(token)
+        token.short_grade = _calculate_short_grade(token)
 
-        # Rebound potential: inverse of crowdedness + price drop momentum
-        token.rebound_potential = min(drop_normalized * 0.7 + token.crowdedness_score * 0.3, 1.0)
-
-        # Risk rating
-        risk = token.crowdedness_score
+        # Risk rating bands use long_crowdedness (high = good for shorting).
+        risk = token.long_crowdedness
         if risk > 0.8:
             token.short_risk_rating = "extreme"
         elif risk > 0.6:
