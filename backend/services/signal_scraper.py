@@ -1,10 +1,13 @@
 """Binance Square signal scraper."""
 import asyncio
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from services.database import get_db
+
+logger = logging.getLogger(__name__)
 
 # Full-name map for symbol-to-name expansion in scrape_hot (matches plan spec).
 SYMBOL_FULL_NAMES = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
@@ -47,39 +50,35 @@ class BinanceSquareScraper:
         return posts
 
     async def _fetch_posts(self, limit: int) -> list[dict[str, Any]]:
-        """Fetch raw posts from Binance Square.
+        """Fetch real Binance Square posts via the singleton browser.
 
-        NOTE: Real implementation requires browser automation.
-        For now, returns sample data for testing.
+        The browser swallows nothing — the four `BrowserError` subclasses
+        (LoginWall / Captcha / RateLimit / Parse) are caught here and
+        converted to an empty list so the scheduler tick is a no-op
+        instead of an error. Any other exception is allowed to propagate
+        so the scheduler's existing error-handling path still fires.
         """
-        # Real implementation would use browser-use to:
-        # 1. Navigate to https://www.binance.com/en/square
-        # 2. Login with credentials
-        # 3. Scroll and extract posts
-        # 4. Return structured data
-        return [
-            {
-                "url": "https://www.binance.com/en/square/post/1",
-                "author": "TraderOne",
-                "content": "Just bought $SOL at $140, looking bullish! Target $200. #SOL #crypto",
-                "likes": 234,
-                "comments": 45,
-            },
-            {
-                "url": "https://www.binance.com/en/square/post/2",
-                "author": "CryptoWhale",
-                "content": "$ETH breaking out! Massive volume incoming. Don't miss this train! #ETH",
-                "likes": 189,
-                "comments": 67,
-            },
-            {
-                "url": "https://www.binance.com/en/square/post/3",
-                "author": "BearHunter",
-                "content": "$BTC looking weak, might dump to 60k. Watch out! #BTC",
-                "likes": 123,
-                "comments": 89,
-            },
-        ]
+        from services.binance_square_browser import (
+            CaptchaError,
+            LoginWallError,
+            ParseError,
+            RateLimitError,
+            get_browser,
+        )
+
+        browser = get_browser()
+        try:
+            raw = await browser.fetch_posts(limit)
+        except (LoginWallError, CaptchaError, RateLimitError) as e:
+            logger.warning(f"[BinanceSquareScraper] {type(e).__name__}: {e}")
+            return []
+        except ParseError as e:
+            logger.error(
+                f"[BinanceSquareScraper] parse failed: {e} "
+                f"(screenshot: {e.screenshot_path})"
+            )
+            return []
+        return raw
 
     def _extract_tokens(self, content: str) -> list[str]:
         """Extract token symbols from post content."""
