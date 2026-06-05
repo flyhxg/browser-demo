@@ -3,11 +3,11 @@
     <!-- Header -->
     <div class="wf-header">
       <h1>Workflow</h1>
-      <p class="wf-subtitle">Scheduled task control for the signal scanner</p>
+      <p class="wf-subtitle">Scheduled task control for the registered schedulers</p>
     </div>
 
     <!-- Loading / empty state -->
-    <div v-if="loading && !task" class="loading-card">
+    <div v-if="loading && tasks.length === 0" class="loading-card">
       <div class="loading-spinner"></div>
       <span>Loading scheduler state…</span>
     </div>
@@ -19,20 +19,24 @@
       <button class="btn-outline" @click="fetchStatus">Retry</button>
     </div>
 
-    <template v-else-if="task">
-      <!-- Task Card -->
-      <div class="task-card">
+    <template v-else-if="tasks.length > 0">
+      <div
+        v-for="task in tasks"
+        :key="task.id"
+        class="task-card"
+        :data-task-id="task.id"
+      >
         <div class="task-header">
           <div class="task-identity">
-            <span class="task-icon" :class="statusClass">⚡</span>
+            <span class="task-icon" :class="statusClass(task)">⚡</span>
             <div>
               <div class="task-name">{{ task.name }}</div>
               <div class="task-id">Task #{{ task.id }}</div>
             </div>
           </div>
-          <div class="task-status-badge" :class="statusClass">
-            <span class="status-dot" :class="statusClass"></span>
-            {{ statusLabel }}
+          <div class="task-status-badge" :class="statusClass(task)">
+            <span class="status-dot" :class="statusClass(task)"></span>
+            {{ statusLabel(task) }}
           </div>
         </div>
 
@@ -60,10 +64,10 @@
         <div class="task-actions">
           <button
             class="btn-primary"
-            :disabled="actionPending"
-            @click="toggleTask"
+            :disabled="isActionPending(task.id)"
+            @click="toggleTask(task)"
           >
-            <span v-if="actionPending">Working…</span>
+            <span v-if="isActionPending(task.id)">Working…</span>
             <span v-else-if="task.running">⏸ Pause</span>
             <span v-else-if="task.enabled">▶ Resume</span>
             <span v-else>Enable & Start</span>
@@ -71,36 +75,36 @@
 
           <button
             class="btn-accent"
-            :disabled="actionPending || !task.enabled"
+            :disabled="isActionPending(task.id) || !task.enabled"
             :title="!task.enabled ? 'Task is disabled — enable first' : 'Run a single tick immediately'"
-            @click="runNow"
+            @click="runNow(task)"
           >
             ▶ Run Now
           </button>
 
           <div class="interval-control">
-            <label for="interval-input">Interval (min):</label>
+            <label :for="`interval-input-${task.id}`">Interval (min):</label>
             <input
-              id="interval-input"
-              v-model.number="intervalInput"
+              :id="`interval-input-${task.id}`"
+              v-model.number="intervalInputs[task.id]"
               type="number"
               min="1"
               max="60"
-              :disabled="intervalSaving"
+              :disabled="isIntervalSaving(task.id)"
             />
             <button
               class="btn-outline"
-              :disabled="intervalSaving || intervalInput === task.interval_minutes"
-              @click="saveInterval"
+              :disabled="isIntervalSaving(task.id) || intervalInputs[task.id] === task.interval_minutes"
+              @click="saveInterval(task)"
             >
-              {{ intervalSaving ? 'Saving…' : 'Save' }}
+              {{ isIntervalSaving(task.id) ? 'Saving…' : 'Save' }}
             </button>
-            <span v-if="intervalResult === 'ok'" class="status ok">Saved</span>
-            <span v-if="intervalResult === 'err'" class="status err">Save failed</span>
+            <span v-if="intervalResults[task.id] === 'ok'" class="status ok">Saved</span>
+            <span v-if="intervalResults[task.id] === 'err'" class="status err">Save failed</span>
           </div>
         </div>
 
-        <div v-if="actionError" class="action-error">{{ actionError }}</div>
+        <div v-if="actionErrors[task.id]" class="action-error">{{ actionErrors[task.id] }}</div>
       </div>
 
       <!-- Help text -->
@@ -108,31 +112,36 @@
         <h3>How it works</h3>
         <ul>
           <li>
-            <strong>Signal Scanner</strong> runs on the backend every N minutes
-            and scrapes Binance Square for new posts.
+            <strong>Signal Scanner</strong> runs the Binance Square signal scraper
+            on the interval shown on its card.
           </li>
           <li>
-            <strong>Pause</strong> stops the loop without forgetting the interval;
-            the task resumes from the same point when started again.
+            <strong>Polymarket Poller</strong> runs the top-200 cluster signal
+            poller plus the position monitor (SL/TP).
           </li>
           <li>
-            <strong>Run Now</strong> fires a single tick in the background
-            (non-blocking) — useful for testing config changes without waiting.
+            <strong>Pause / Run Now / Interval</strong> work the same way on both
+            cards — each control binds to its own task.
           </li>
           <li>
-            Changing the interval only affects future ticks; the current tick
-            (if any) finishes first.
+            Each card's kill switch persists independently — flipping one
+            doesn't affect the other.
           </li>
         </ul>
       </div>
     </template>
+
+    <!-- Loaded but no schedulers registered (shouldn't happen in prod) -->
+    <div v-else class="loading-card">
+      <span>No schedulers registered.</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
-interface TaskStatus {
+export interface TaskStatus {
   id: number
   name: string
   enabled: boolean
@@ -145,29 +154,36 @@ interface TaskStatus {
 
 const POLL_INTERVAL_MS = 2000
 
-const task = ref<TaskStatus | null>(null)
+const tasks = ref<TaskStatus[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
-const actionPending = ref(false)
-const actionError = ref<string | null>(null)
 
-const intervalInput = ref<number>(5)
-const intervalSaving = ref(false)
-const intervalResult = ref<'ok' | 'err' | null>(null)
+// Per-card state. Keys are task.id.
+const actionPendingIds = ref<Set<number>>(new Set())
+const actionErrors = ref<Record<number, string | null>>({})
+const intervalInputs = ref<Record<number, number>>({})
+const intervalSavingIds = ref<Set<number>>(new Set())
+const intervalResults = ref<Record<number, 'ok' | 'err' | null>>({})
 
-const statusLabel = computed(() => {
-  if (!task.value) return ''
-  if (task.value.running) return 'Running'
-  if (!task.value.enabled) return 'Disabled'
+function isActionPending(taskId: number): boolean {
+  return actionPendingIds.value.has(taskId)
+}
+
+function isIntervalSaving(taskId: number): boolean {
+  return intervalSavingIds.value.has(taskId)
+}
+
+function statusLabel(t: TaskStatus): string {
+  if (t.running) return 'Running'
+  if (!t.enabled) return 'Disabled'
   return 'Paused'
-})
+}
 
-const statusClass = computed(() => {
-  if (!task.value) return 'inactive'
-  if (task.value.running) return 'active'
-  if (task.value.enabled) return 'idle'
+function statusClass(t: TaskStatus): string {
+  if (t.running) return 'active'
+  if (t.enabled) return 'idle'
   return 'inactive'
-})
+}
 
 function formatTimestamp(epochSeconds: number | null): string {
   if (!epochSeconds) return '—'
@@ -180,19 +196,18 @@ async function fetchStatus() {
     const resp = await fetch('/api/workflow/tasks')
     if (!resp.ok) {
       error.value = `HTTP ${resp.status}: ${resp.statusText}`
-      task.value = null
+      tasks.value = []
       return
     }
     const data = await resp.json()
-    const tasks: TaskStatus[] = data.tasks || []
+    const fetched: TaskStatus[] = data.tasks || []
     error.value = null
-    if (tasks.length === 0) {
-      task.value = null
-      return
-    }
-    task.value = tasks[0]
-    if (intervalInput.value !== tasks[0].interval_minutes) {
-      intervalInput.value = tasks[0].interval_minutes
+    tasks.value = fetched
+    // Seed per-card interval inputs only if the user hasn't started editing.
+    for (const t of fetched) {
+      if (intervalInputs.value[t.id] === undefined) {
+        intervalInputs.value[t.id] = t.interval_minutes
+      }
     }
   } catch (e: any) {
     error.value = e?.message || 'Network error'
@@ -201,71 +216,98 @@ async function fetchStatus() {
   }
 }
 
-async function toggleTask() {
-  if (!task.value) return
-  actionPending.value = true
-  actionError.value = null
+async function toggleTask(t: TaskStatus) {
+  if (isActionPending(t.id)) return
+  actionPendingIds.value.add(t.id)
+  // Trigger reactivity for the Set
+  actionPendingIds.value = new Set(actionPendingIds.value)
+  actionErrors.value[t.id] = null
   try {
-    const resp = await fetch(`/api/workflow/tasks/${task.value.id}/toggle`, { method: 'POST' })
+    // When the persisted kill switch is off, the "Enable & Start"
+    // label needs /enable (which persists the kill switch AND
+    // starts the scheduler). Once the task is enabled, /toggle is
+    // the right endpoint for Pause / Resume.
+    const endpoint = t.enabled
+      ? `/api/workflow/tasks/${t.id}/toggle`
+      : `/api/workflow/tasks/${t.id}/enable`
+    const resp = await fetch(endpoint, { method: 'POST' })
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}))
-      actionError.value = body.detail || `HTTP ${resp.status}`
+      actionErrors.value[t.id] = body.detail || `HTTP ${resp.status}`
     } else {
       await fetchStatus()
     }
   } catch (e: any) {
-    actionError.value = e?.message || 'Network error'
+    actionErrors.value[t.id] = e?.message || 'Network error'
   } finally {
-    actionPending.value = false
+    actionPendingIds.value.delete(t.id)
+    actionPendingIds.value = new Set(actionPendingIds.value)
   }
 }
 
-async function runNow() {
-  if (!task.value) return
-  actionPending.value = true
-  actionError.value = null
+async function runNow(t: TaskStatus) {
+  if (isActionPending(t.id)) return
+  actionPendingIds.value.add(t.id)
+  actionPendingIds.value = new Set(actionPendingIds.value)
+  actionErrors.value[t.id] = null
   try {
-    const resp = await fetch(`/api/workflow/tasks/${task.value.id}/run`, { method: 'POST' })
+    const resp = await fetch(`/api/workflow/tasks/${t.id}/run`, { method: 'POST' })
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}))
-      actionError.value = body.detail || `HTTP ${resp.status}`
+      actionErrors.value[t.id] = body.detail || `HTTP ${resp.status}`
     } else {
       // Refresh after a brief moment so the UI reflects the new last_run
-      setTimeout(fetchStatus, 500)
+      scheduleTimeout(fetchStatus, 500)
     }
   } catch (e: any) {
-    actionError.value = e?.message || 'Network error'
+    actionErrors.value[t.id] = e?.message || 'Network error'
   } finally {
-    actionPending.value = false
+    actionPendingIds.value.delete(t.id)
+    actionPendingIds.value = new Set(actionPendingIds.value)
   }
 }
 
-async function saveInterval() {
-  if (!task.value) return
-  if (intervalInput.value === task.value.interval_minutes) return
-  intervalSaving.value = true
-  intervalResult.value = null
+async function saveInterval(t: TaskStatus) {
+  if (isIntervalSaving(t.id)) return
+  const desired = intervalInputs.value[t.id]
+  if (desired === t.interval_minutes) return
+  intervalSavingIds.value.add(t.id)
+  intervalSavingIds.value = new Set(intervalSavingIds.value)
+  intervalResults.value[t.id] = null
   try {
     const resp = await fetch('/api/workflow/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ interval_minutes: intervalInput.value }),
+      body: JSON.stringify({ task_id: t.id, interval_minutes: desired }),
     })
     if (!resp.ok) {
-      intervalResult.value = 'err'
+      intervalResults.value[t.id] = 'err'
     } else {
-      intervalResult.value = 'ok'
+      intervalResults.value[t.id] = 'ok'
       await fetchStatus()
     }
   } catch {
-    intervalResult.value = 'err'
+    intervalResults.value[t.id] = 'err'
   } finally {
-    intervalSaving.value = false
-    setTimeout(() => { intervalResult.value = null }, 2000)
+    intervalSavingIds.value.delete(t.id)
+    intervalSavingIds.value = new Set(intervalSavingIds.value)
+    scheduleTimeout(() => { intervalResults.value[t.id] = null }, 2000)
   }
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+// Pending one-shot timers (e.g. from runNow's 500ms refresh, saveInterval's
+// 2s status clear). Tracked so onUnmounted can cancel them — otherwise they
+// fire on an unmounted component and call setRef/setValue on detached state.
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
+
+function scheduleTimeout(fn: () => void, ms: number): void {
+  const id = setTimeout(() => {
+    pendingTimers.delete(id)
+    fn()
+  }, ms)
+  pendingTimers.add(id)
+}
 
 onMounted(() => {
   fetchStatus()
@@ -274,6 +316,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  for (const id of pendingTimers) clearTimeout(id)
+  pendingTimers.clear()
 })
 </script>
 
