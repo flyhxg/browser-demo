@@ -95,6 +95,32 @@ export interface HotToken {
   heat_score: number
   heat_rank?: number
   updated_at?: string
+  // Short analysis (long-side direction, Phase 1a)
+  long_crowdedness?: number
+  long_squeeze_risk?: number
+  extension_score?: number
+  short_risk_rating?: string
+  short_grade?: string
+  short_opportunity_score?: number
+  // Hot tick derivations
+  oi_usd?: number
+  funding_annualized?: number
+  // Warm/cold fields (Phase 1b populates; rendered as 0 for now)
+  market_cap?: number
+  top10_holders_pct?: number
+  gini?: number
+  fdv_mcap_ratio?: number
+  sector?: string
+  consecutive_up_days?: number
+  trend_strength?: number
+  high_24h?: number
+  low_24h?: number
+  atr?: number
+  rebound_multiple?: number
+  low_7d?: number
+  stop_loss_price?: number
+  take_profit_price?: number
+  recommended_leverage?: number
 }
 
 export interface HotTokensUpdateData {
