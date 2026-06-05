@@ -7,9 +7,9 @@ than holding module-level globals. The actual `TopUsersPoller` /
 scheduler — see `services/scheduler.PolymarketScheduler.start()` —
 and constructed via the injectable `poller_factory` / `monitor_factory`.
 
-`_handle_cluster_signal` and `_execute_signal` stay in this file
-because the scheduler is constructed in `main.py` (Task 6) with
-`signal_handler=_handle_cluster_signal` injected. The signal
+`handle_cluster_signal` and `_execute_signal` stay in this file
+because the scheduler is constructed in `main.py` with
+`signal_handler=handle_cluster_signal` injected. The signal
 pathway writes to `polymarket_signals` / `polymarket_trades` /
 `polymarket_positions` and is unchanged.
 """
@@ -266,7 +266,7 @@ async def get_polymarket_status() -> dict[str, Any]:
     }
 
 
-async def _handle_cluster_signal(signal: ClusterSignal) -> None:
+async def handle_cluster_signal(signal: ClusterSignal) -> None:
     """Handle incoming cluster signal: save to DB and optionally execute."""
     import hashlib
 

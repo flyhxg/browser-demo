@@ -12,7 +12,7 @@ restores it on teardown so the test is hermetic w.r.t. the order pytest
 collects tests in.
 
 The test is intentionally small: anything fancier (mocking out the scraper,
-replacing `_handle_cluster_signal`, etc.) is not needed because main.py's
+replacing `handle_cluster_signal`, etc.) is not needed because main.py's
 module-level code is cheap:
   - `BinanceSquareScraper()` is a no-op class — no I/O.
   - `SignalScanScheduler(...)` and `PolymarketScheduler(...)` constructors
@@ -110,20 +110,20 @@ def test_main_module_idempotent_under_reimport():
 def test_main_module_constructs_polymarket_scheduler_with_signal_handler():
     """The registered PolymarketScheduler must have its signal handler wired.
 
-    `main.py` constructs the scheduler with `signal_handler=_handle_cluster_signal`
+    `main.py` constructs the scheduler with `signal_handler=handle_cluster_signal`
     (the function from `api.polymarket` that persists + auto-executes signals).
     If this binding ever breaks, the poller will detect clusters but never
     persist them — the `polymarket_signals` table would stay empty.
     """
-    from api.polymarket import _handle_cluster_signal
+    from api.polymarket import handle_cluster_signal
 
     _fresh_main()
 
     poly = get_scheduler(2)
     assert poly is not None
-    assert poly._signal_handler is _handle_cluster_signal, (
+    assert poly._signal_handler is handle_cluster_signal, (
         "PolymarketScheduler._signal_handler was not wired to "
-        "api.polymarket._handle_cluster_signal"
+        "api.polymarket.handle_cluster_signal"
     )
 
 

@@ -25,7 +25,7 @@ from services.scheduler import (
     register,
     set_scheduler_instance,
 )
-from api.polymarket import _handle_cluster_signal
+from api.polymarket import handle_cluster_signal
 from services.sector_classifier import configure_proxy, get_classifier
 from services.signal_scraper import BinanceSquareScraper
 from services.ws_manager import manager
@@ -50,9 +50,11 @@ async def _ws_relay(event: str, payload: dict) -> None:
 
 
 _scheduler = SignalScanScheduler(_scraper, ws_broadcast=_ws_relay)
+# set_scheduler_instance is the legacy singleton shim; it forwards to register()
+# under the hood. New schedulers should call register() directly (see _poly below).
 set_scheduler_instance(_scheduler)
 
-_poly = PolymarketScheduler(signal_handler=_handle_cluster_signal)
+_poly = PolymarketScheduler(signal_handler=handle_cluster_signal)
 register(_poly)
 
 
