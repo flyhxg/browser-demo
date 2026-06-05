@@ -67,7 +67,7 @@
             <div class="signal-top">
               <div class="signal-source">
                 <span class="source-badge">{{ signal.source }}</span>
-                <span class="signal-time">{{ formatDate(signal.created_at) }}</span>
+                <span class="signal-time" :title="signal.created_at">{{ formatRelativeTime(signal.created_at) }}</span>
               </div>
               <span class="status-badge" :class="signal.status">{{ signal.status }}</span>
             </div>
@@ -422,6 +422,32 @@ function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// Render an ISO/string timestamp as "5m ago" / "2h ago" / "3d ago",
+// falling back to a short absolute date once a post is older than a week.
+// New BinanceSquareScraper rows carry the post's own creation time
+// (from binance_square_browser._parse_html); legacy rows carry the DB
+// row insert time — both are valid `Date` inputs, so the relative
+// display works for them too (it just shows the time since insert).
+// Empty / unparseable values render as '' and leave the timestamp slot
+// blank rather than showing "1970/1/1".
+function formatRelativeTime(isoString: string | null | undefined): string {
+  if (!isoString) return ''
+  const post = new Date(isoString)
+  if (isNaN(post.getTime())) return ''
+  const now = Date.now()
+  const diffMs = now - post.getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  if (diffSec < 60) return 'just now'
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}h ago`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+  // Older than 7 days: show absolute date so the user can still tell when it was
+  return post.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 // --- Crypto API ---
