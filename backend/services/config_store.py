@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
@@ -76,6 +77,44 @@ def set_signal_scan_interval(minutes: int) -> None:
     conn.execute(
         "UPDATE trading_config SET signal_scan_interval_minutes = ? WHERE id = 1",
         (minutes,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_polymarket_enabled(enabled: bool) -> None:
+    """Persist the Polymarket kill switch in the polymarket_config table.
+
+    The scheduler re-reads `enabled` from this row on every tick, so
+    flipping the flag takes effect on the next tick boundary without
+    restart. Callers should also call `scheduler.start()` if they want
+    the new value to take effect immediately.
+    """
+    from services.database import get_db
+    conn = get_db()
+    conn.execute(
+        "UPDATE polymarket_config SET enabled = ? WHERE id = 1",
+        (1 if enabled else 0,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_polymarket_interval(seconds: int) -> None:
+    """Persist the Polymarket poll interval (seconds) in polymarket_config.
+
+    The scheduler re-reads this on every tick. Must be a positive
+    integer; raises ValueError otherwise. Note the unit is **seconds**
+    (not minutes) because the upstream poller runs at sub-minute
+    cadence.
+    """
+    if not isinstance(seconds, int) or seconds < 10:
+        raise ValueError(f"polymarket interval must be int >= 10s, got {seconds!r}")
+    from services.database import get_db
+    conn = get_db()
+    conn.execute(
+        "UPDATE polymarket_config SET poll_interval = ? WHERE id = 1",
+        (seconds,),
     )
     conn.commit()
     conn.close()
@@ -174,3 +213,34 @@ def get_trading_config() -> dict:
         "hot_tokens_auto_execute": config.get("hot_tokens_auto_execute", False),
         "hot_tokens_auto_threshold": config.get("hot_tokens_auto_threshold", 0.8),
     }
+
+
+DEFAULT_BINANCE_SQUARE_CONFIG = {
+    "url": "https://www.binance.com/en/square",
+    "user_agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+    ),
+    "max_posts_per_scrape": 30,
+    "headless": True,
+    "scroll_passes": 2,
+    "scroll_pause_ms": 2500,
+}
+
+# In-process cache (configurable via the workflow UI; not persisted across restarts in v1)
+_scrape_config_overrides: dict[str, Any] = {}
+
+
+def get_binance_square_scrape_config() -> dict[str, Any]:
+    """Read effective scrape config: defaults merged with any in-process overrides."""
+    cfg = DEFAULT_BINANCE_SQUARE_CONFIG.copy()
+    cfg.update(_scrape_config_overrides)
+    return cfg
+
+
+def set_binance_square_scrape_config(patch: dict[str, Any]) -> dict[str, Any]:
+    """Patch the in-process scrape config. Returns the new effective config."""
+    for k, v in patch.items():
+        if k in DEFAULT_BINANCE_SQUARE_CONFIG:
+            _scrape_config_overrides[k] = v
+    return get_binance_square_scrape_config()
