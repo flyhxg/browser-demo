@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     "hot_tokens_auto_execute": False,
     "hot_tokens_auto_threshold": 0.8,
     "chat_use_llm_analysis": False,
+    "arkham_api_key": "",
 }
 
 
@@ -173,6 +174,7 @@ def get_masked_config() -> dict:
         "hot_tokens_max_results": config.get("hot_tokens_max_results", 50),
         "hot_tokens_auto_execute": config.get("hot_tokens_auto_execute", False),
         "hot_tokens_auto_threshold": config.get("hot_tokens_auto_threshold", 0.8),
+        "arkham_api_key_masked": mask_key(config.get("arkham_api_key", "")),
     }
 
 
@@ -183,7 +185,8 @@ def update_config(data: dict) -> dict:
                                             "browser_use_api_key", "binance_", "trading_enabled",
                                             "max_position_size", "tp_percentage", "sl_percentage",
                                             "position_pct", "max_open_positions",
-                                            "min_confidence", "scan_interval", "hot_tokens_")):
+                                            "min_confidence", "scan_interval", "hot_tokens_",
+                                            "arkham_")):
             config[key] = data[key]
     _save_config(config)
     return get_masked_config()
