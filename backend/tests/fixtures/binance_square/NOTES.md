@@ -5,12 +5,13 @@
 **Tool:** Playwright + chromium (headless), UA `Chrome/127.0.0.0`, viewport 1920x1080
 **Wait strategy:** `domcontentloaded` + 5s settle + 2 scroll-downs (1200px each, 2.5s gap)
 **Files:**
-- `home_with_posts.html` (681,753 bytes) — real feed with 20 posts
-- `empty_page.html` (681,753 bytes) — best-effort (same as home; no empty state detected)
-- `login_wall.html` (681,753 bytes) — best-effort (no login wall detected)
-- `captcha.html` (681,753 bytes) — best-effort (no captcha detected)
+- `home_with_posts.html` (681,753 bytes) — real feed with 20 posts captured from Binance Square
+- `capture_fixtures.py` — the Playwright script that produced the HTML
+- `synthetic_empty_page.html` — minimal hand-crafted HTML for the empty-state test
+- `synthetic_login_wall.html` — minimal hand-crafted HTML for the login-wall test
+- `synthetic_captcha.html` — minimal hand-crafted HTML for the captcha test
 
-**Status:** Capture succeeded. Page rendered the public feed without bot challenge. 20 real posts with full author/content/likes/comments/views metadata. No login wall or captcha was triggered (consistent with the 5s headless wait + scrolled loads — Binance allows anonymous feed reads).
+**Status:** Capture succeeded. Page rendered the public feed without bot challenge. 20 real posts with full author/content/likes/comments/views metadata. No login wall or captcha was triggered during capture (consistent with the 5s headless wait + scrolled loads — Binance allows anonymous feed reads). If the live browser later hits an error state, re-run `capture_fixtures.py` to refresh these as real captures.
 
 ---
 
@@ -86,4 +87,4 @@ Re-run from project root when Binance changes the DOM:
 cd backend && python tests/fixtures/binance_square/capture_fixtures.py
 ```
 
-The script overwrites the four `.html` files in place.
+The script overwrites the captured `.html` files in place.

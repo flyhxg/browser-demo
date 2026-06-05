@@ -58,3 +58,53 @@ def test_parse_respects_limit():
     browser = BinanceSquareBrowser()
     posts = browser._parse_html(html, limit=2)
     assert len(posts) <= 2
+
+
+from services.binance_square_browser import (
+    _extract_tokens,
+    _parse_int,
+)
+
+
+def test_parse_int_handles_k_suffix():
+    assert _parse_int("1.2K") == 1200
+    assert _parse_int("1k") == 1000
+
+
+def test_parse_int_handles_m_suffix():
+    assert _parse_int("1.5M") == 1_500_000
+    assert _parse_int("1m") == 1_000_000
+
+
+def test_parse_int_handles_plain_and_comma_separated():
+    assert _parse_int("234") == 234
+    assert _parse_int("1,234") == 1234
+    assert _parse_int("1,234,567") == 1234567
+
+
+def test_parse_int_handles_empty_and_invalid():
+    assert _parse_int("") == 0
+    assert _parse_int("abc") == 0
+    assert _parse_int(None) == 0  # type: ignore[arg-type]
+
+
+def test_extract_tokens_finds_dollar_and_hash_mentions():
+    assert _extract_tokens("$BTC to the moon") == ["BTC"]
+    assert _extract_tokens("Bullish on $ETH and #SOL") == ["ETH", "SOL"]
+
+
+def test_extract_tokens_dedupes_and_filters_by_length():
+    # Dedup
+    assert _extract_tokens("$BTC $BTC") == ["BTC"]
+    # Below 2 chars: excluded
+    assert _extract_tokens("$B") == []
+    # 10 chars: included
+    assert _extract_tokens("$LONGTOKENX") == ["LONGTOKENX"]
+    # 11 chars: excluded
+    assert _extract_tokens("$TOOLONGTOKEN") == []
+
+
+def test_extract_tokens_handles_lowercase_as_no_match():
+    """Lowercase symbols are NOT token mentions per the spec regex."""
+    assert _extract_tokens("btc to the moon") == []
+    assert _extract_tokens("$btc") == []

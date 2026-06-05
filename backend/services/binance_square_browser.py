@@ -10,6 +10,8 @@ import re
 import time
 from typing import Any, Optional
 
+from bs4 import BeautifulSoup
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,9 +29,12 @@ SELECTORS = {
 }
 
 
-# Match $BTC / #ETH style token mentions inside a post body. 2-10 uppercase
-# letters prevents hex colors (e.g. #FFF) leaking into the token list.
-_TOKEN_PATTERN = re.compile(r"[\$#]([A-Z]{2,10})")
+# Match $BTC / #ETH style token mentions inside a post body.
+# Catches 2-10 uppercase chars after $ or # (so single-letter tokens like $B
+# are excluded; long ones like $BITCOINUSD still pass). The negative lookahead
+# `(?![A-Z])` ensures we don't take a 10-char prefix out of a longer run
+# (e.g. $TOOLONGTOKEN should not match as $TOOLONGTOK).
+_TOKEN_PATTERN = re.compile(r"[\$#]([A-Z]{2,10})(?![A-Z])")
 
 
 # --- Custom exceptions ---
@@ -88,8 +93,6 @@ class BinanceSquareBrowser:
         Posts without a $XXX / #XXX token mention are dropped — the downstream
         pipeline only cares about tokenised signal.
         """
-        from bs4 import BeautifulSoup  # type: ignore
-
         _detect_error_page(html)
 
         soup = BeautifulSoup(html, "html.parser")
@@ -188,7 +191,8 @@ def _parse_int(text: str) -> int:
 
 
 def _extract_tokens(content: str) -> list[str]:
-    return list(set(_TOKEN_PATTERN.findall(content)))
+    # Sort for deterministic ordering — `set` alone has arbitrary iteration order.
+    return sorted(set(_TOKEN_PATTERN.findall(content)))
 
 
 # --- Module-level singleton ---
